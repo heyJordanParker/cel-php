@@ -99,11 +99,11 @@ final class Parser implements ParserInterface
      */
     private function parseExpression(): Expression
     {
-        $expr = $this->parseConditionalOr();
+        $expr = $this->parseCoalesce();
 
         if (!$this->stream->hasReachedEnd() && $this->stream->isAt(TokenKind::Question)) {
             $question = $this->stream->eat(TokenKind::Question);
-            $then = $this->parseConditionalOr();
+            $then = $this->parseCoalesce();
             $colon = $this->stream->eat(TokenKind::Colon);
             $else = $this->parseExpression(); // Right-associative
 
@@ -111,6 +111,30 @@ final class Parser implements ParserInterface
         }
 
         return $expr;
+    }
+
+    /**
+     * Parses the null-or-empty coalesce operator (`??`).
+     *
+     * Binds looser than logical OR and tighter than the ternary conditional, and
+     * is left-associative, so `a ?? b ?? c` groups as `(a ?? b) ?? c`.
+     *
+     * @throws UnexpectedEndOfFileException
+     * @throws UnexpectedTokenException
+     * @throws InternalException If internal parsing operations fail.
+     */
+    private function parseCoalesce(): Expression
+    {
+        $left = $this->parseConditionalOr();
+
+        while (!$this->stream->hasReachedEnd() && $this->stream->isAt(TokenKind::DoubleQuestion)) {
+            $opToken = $this->stream->eat(TokenKind::DoubleQuestion);
+            $operator = new BinaryOperator(BinaryOperatorKind::Coalesce, $opToken->span);
+            $right = $this->parseConditionalOr();
+            $left = new BinaryExpression($left, $operator, $right);
+        }
+
+        return $left;
     }
 
     /**

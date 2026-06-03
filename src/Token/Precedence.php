@@ -48,14 +48,23 @@ enum Precedence: int
     case Or = 7;
 
     /**
+     * Precedence for the null-or-empty coalesce operator (`??`).
+     *
+     * Binds looser than logical OR and tighter than the ternary conditional,
+     * so `a || b ?? c` groups as `(a || b) ?? c` and `a ?? b ? c : d` groups
+     * as `(a ?? b) ? c : d`.
+     */
+    case Coalesce = 8;
+
+    /**
      * Precedence for the ternary conditional operator (`?:`).
      */
-    case Conditional = 8;
+    case Conditional = 9;
 
     public function getAssociativity(): null|Associativity
     {
         return match ($this) {
-            Precedence::Call, Precedence::Multiplicative => Associativity::LeftToRight,
+            Precedence::Call, Precedence::Multiplicative, Precedence::Coalesce => Associativity::LeftToRight,
             Precedence::Unary, Precedence::Conditional => Associativity::RightToLeft,
             default => null,
         };

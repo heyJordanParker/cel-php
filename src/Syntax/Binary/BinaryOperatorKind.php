@@ -20,6 +20,7 @@ enum BinaryOperatorKind
     case Modulo;
     case And;
     case Or;
+    case Coalesce;
 
     public function isLogical(): bool
     {
@@ -85,6 +86,7 @@ enum BinaryOperatorKind
             self::Modulo => '%',
             self::And => '&&',
             self::Or => '||',
+            self::Coalesce => '??',
         };
     }
 }

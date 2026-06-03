@@ -92,6 +92,7 @@ final readonly class Lexer implements LexerInterface
             // Multi-character operators
             '&' === $char && $this->input->peek(1, 1) === '&' => $this->consumeFixed(TokenKind::DoubleAmpersand, 2),
             '|' === $char && $this->input->peek(1, 1) === '|' => $this->consumeFixed(TokenKind::DoublePipe, 2),
+            '?' === $char && $this->input->peek(1, 1) === '?' => $this->consumeFixed(TokenKind::DoubleQuestion, 2),
             '=' === $char && $this->input->peek(1, 1) === '=' => $this->consumeFixed(TokenKind::Equal, 2),
             '!' === $char && $this->input->peek(1, 1) === '=' => $this->consumeFixed(TokenKind::NotEqual, 2),
             '<' === $char && $this->input->peek(1, 1) === '=' => $this->consumeFixed(TokenKind::LessOrEqual, 2),
