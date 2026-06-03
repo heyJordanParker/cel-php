@@ -10,7 +10,6 @@ use Cel\Exception\InvalidConditionTypeException;
 use Cel\Exception\InvalidOptionalConstructionException;
 use Cel\Exception\MessageConstructionException;
 use Cel\Exception\NoSuchFunctionException;
-use Cel\Exception\NoSuchKeyException;
 use Cel\Exception\NoSuchOverloadException;
 use Cel\Exception\NoSuchTypeException;
 use Cel\Exception\NoSuchVariableException;
@@ -302,6 +301,22 @@ final class Interpreter implements InterpreterInterface, MacroContextInterface
     {
         $operator = $expression->operator->kind;
 
+        // Handle short-circuit evaluation for the `??` coalesce operator. The
+        // left operand is returned unless it is null or empty (empty string,
+        // empty list, or empty map), in which case the right operand is
+        // evaluated and returned. `0` and `false` are real values, not empty,
+        // so they are returned as-is. The right operand is only evaluated when
+        // the left falls back.
+        if ($operator === BinaryOperatorKind::Coalesce) {
+            $left = $this->run($expression->left);
+
+            if ($this->isNullOrEmpty($left)) {
+                return $this->run($expression->right);
+            }
+
+            return $left;
+        }
+
         // Handle short-circuit evaluation for AND with literal booleans
         if ($operator === BinaryOperatorKind::And) {
             if ($expression->left instanceof BoolLiteralExpression && !$expression->left->value) {
@@ -401,6 +416,25 @@ final class Interpreter implements InterpreterInterface, MacroContextInterface
     }
 
     /**
+     * Determines whether a value is null or empty for the purposes of the `??`
+     * coalesce operator.
+     *
+     * Null, the empty string, the empty list, and the empty map are empty. All
+     * other values — including `0`, `0.0`, and `false` — are real values and
+     * are not considered empty.
+     */
+    private function isNullOrEmpty(Value $value): bool
+    {
+        return match (true) {
+            $value instanceof NullValue => true,
+            $value instanceof StringValue => $value->value === '',
+            $value instanceof ListValue => $value->value === [],
+            $value instanceof MapValue => $value->value === [],
+            default => false,
+        };
+    }
+
+    /**
      * @throws EvaluationException
      */
     private function conditional(ConditionalExpression $expression): Value
@@ -453,29 +487,26 @@ final class Interpreter implements InterpreterInterface, MacroContextInterface
     /**
      * Selects a field from a concrete message or map value.
      *
-     * @throws EvaluationException If the field is absent or the value is not selectable.
+     * @throws EvaluationException If the value is not selectable.
      */
     private function selectField(Value $operand, string $field, Span $span): Value
     {
-        if ($operand instanceof MessageValue) {
-            $value = $operand->getField($field);
-            if (null === $value) {
-                throw new NoSuchKeyException(
-                    sprintf('Field `%s` does not exist on message of type `%s`', $field, $operand->message::class),
-                    $span,
-                );
-            }
+        // Null-safe access: a member access on null yields null, so a missing
+        // link anywhere in a chain (`a.b.c`) cascades to null instead of
+        // throwing.
+        if ($operand instanceof NullValue) {
+            return new NullValue();
+        }
 
-            return $value;
+        if ($operand instanceof MessageValue) {
+            // A missing field yields null rather than throwing, so authors do
+            // not need `has()` ceremony to read an optional field.
+            return $operand->getField($field) ?? new NullValue();
         }
 
         if ($operand instanceof MapValue) {
-            $value = $operand->get(MapKeyUtil::stringKey($field));
-            if (null === $value) {
-                throw new NoSuchKeyException(sprintf('Key `%s` does not exist in map', $field), $span);
-            }
-
-            return $value;
+            // A missing key yields null rather than throwing.
+            return $operand->get(MapKeyUtil::stringKey($field)) ?? new NullValue();
         }
 
         throw new NoSuchOverloadException(
@@ -620,6 +651,12 @@ final class Interpreter implements InterpreterInterface, MacroContextInterface
             return $this->optionalIndex($operand, $this->run($expression->index), $expression);
         }
 
+        // Null-safe access: indexing into null yields null, so a missing link
+        // anywhere in a chain (`a[0][1]`) cascades to null instead of throwing.
+        if ($operand instanceof NullValue) {
+            return new NullValue();
+        }
+
         if (!$operand instanceof ListValue && !$operand instanceof MapValue && !$operand instanceof MessageValue) {
             throw new NoSuchOverloadException(
                 sprintf('Indexing is only supported on lists, maps, and messages, got `%s`', $operand->getType()),
@@ -637,32 +674,13 @@ final class Interpreter implements InterpreterInterface, MacroContextInterface
                 );
             }
 
-            $field = $operand->getField($index->value);
-
-            if (null === $field) {
-                throw new NoSuchKeyException(
-                    sprintf(
-                        'Field `%s` does not exist on message of type `%s`',
-                        $index->value,
-                        $operand->message::class,
-                    ),
-                    $expression->getSpan(),
-                );
-            }
-
-            return $field;
+            // A missing field yields null rather than throwing.
+            return $operand->getField($index->value) ?? new NullValue();
         }
 
         if ($operand instanceof MapValue) {
-            $field = $this->mapGet($operand, $index, $expression->index->getSpan());
-            if (null === $field) {
-                throw new NoSuchKeyException(
-                    sprintf('Key `%s` does not exist in map', $this->mapKeyLabel($index)),
-                    $expression->getSpan(),
-                );
-            }
-
-            return $field;
+            // A missing key yields null rather than throwing.
+            return $this->mapGet($operand, $index, $expression->index->getSpan()) ?? new NullValue();
         }
 
         $position = MapKeyUtil::resolveIndex($index);
@@ -673,15 +691,8 @@ final class Interpreter implements InterpreterInterface, MacroContextInterface
             );
         }
 
-        $value = $operand->value[$position] ?? null;
-        if (null === $value) {
-            throw new NoSuchKeyException(
-                sprintf('Index `%d` is out of bounds for list of length `%d`', $position, count($operand->value)),
-                $expression->getSpan(),
-            );
-        }
-
-        return $value;
+        // An out-of-bounds index yields null rather than throwing.
+        return $operand->value[$position] ?? new NullValue();
     }
 
     /**
@@ -756,32 +767,6 @@ final class Interpreter implements InterpreterInterface, MacroContextInterface
         $key = MapKeyUtil::resolve($index);
 
         return null === $key ? null : $map->get($key);
-    }
-
-    /**
-     * Produces a human-readable label for a map index, used in "no such key" errors.
-     */
-    private function mapKeyLabel(Value $index): string
-    {
-        if ($index instanceof BooleanValue) {
-            return $index->value ? 'true' : 'false';
-        }
-
-        if ($index instanceof StringValue) {
-            return $index->value;
-        }
-
-        if ($index instanceof IntegerValue || $index instanceof UnsignedIntegerValue) {
-            return (string) $index->value;
-        }
-
-        if ($index instanceof FloatValue) {
-            $integer = MapKeyUtil::resolveIndex($index);
-
-            return null === $integer ? $index->getType() : (string) $integer;
-        }
-
-        return $index->getType();
     }
 
     /**

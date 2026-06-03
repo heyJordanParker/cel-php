@@ -25,6 +25,7 @@ enum TokenKind
     case Comma;
     case DoubleAmpersand;
     case DoublePipe;
+    case DoubleQuestion;
     case Dot;
     case Equal;
     case NotEqual;
@@ -112,6 +113,7 @@ enum TokenKind
             TokenKind::GreaterOrEqual,
             TokenKind::DoubleAmpersand,
             TokenKind::DoublePipe,
+            TokenKind::DoubleQuestion,
             TokenKind::Question,
             TokenKind::In,
                 => true,
@@ -191,6 +193,8 @@ enum TokenKind
         return match ($this) {
             // `?:`
             self::Question => Precedence::Conditional,
+            // `??`
+            self::DoubleQuestion => Precedence::Coalesce,
             // `||`
             self::DoublePipe => Precedence::Or,
             // `&&`
