@@ -35,7 +35,9 @@ final class CallExpressionTest extends TestCase
         static::assertSame($args, $expr->arguments);
         static::assertSame($close, $expr->closingParenthesis);
         static::assertSame(ExpressionKind::Call, $expr->getKind());
-        static::assertSame([$function], $expr->getChildren());
+        // The target is a child: a walk of the tree has to reach the receiver of
+        // a method call, or `a.b.map(x, x.c)` hides `a.b` from every visitor.
+        static::assertSame([$target, $function], $expr->getChildren());
         $span = $expr->getSpan();
         static::assertSame(0, $span->start);
         static::assertSame(13, $span->end);
@@ -54,7 +56,7 @@ final class CallExpressionTest extends TestCase
 
         $expr = new CallExpression($target, $targetSeparator, $function, $open, $args, $close);
 
-        static::assertSame([$function, $arg1, $arg2], $expr->getChildren());
+        static::assertSame([$target, $function, $arg1, $arg2], $expr->getChildren());
     }
 
     public function testConstructorWithoutTarget(): void
