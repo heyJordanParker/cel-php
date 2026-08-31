@@ -6,6 +6,7 @@ namespace Cel\Runtime;
 
 use Cel\Exception\ConflictingFunctionSignatureException;
 use Cel\Extension\ExtensionInterface;
+use Cel\Function\DynamicFunctionInterface;
 use Cel\Function\FunctionInterface;
 use Cel\Function\FunctionOverloadHandlerInterface;
 use Cel\Operator\BinaryOperatorOverloadHandlerInterface;
@@ -42,6 +43,20 @@ final class OperationRegistry implements DefaultInterface
      * }>>
      */
     private array $functionOverloads = [];
+
+    /**
+     * A map for functions that accept any argument list:
+     *
+     * `[function_name] => ['callable' => handler, 'is_idempotent' => bool]`
+     *
+     * Consulted only when no declared overload matches the provided arguments.
+     *
+     * @var array<string, array{
+     *     callable: FunctionOverloadHandlerInterface,
+     *     is_idempotent: bool,
+     * }>
+     */
+    private array $dynamicFunctions = [];
 
     /**
      * A map for binary operator overloads:
@@ -101,6 +116,13 @@ final class OperationRegistry implements DefaultInterface
     {
         $name = $function->getName();
         $isIdempotent = $function->isIdempotent();
+
+        if ($function instanceof DynamicFunctionInterface) {
+            $this->dynamicFunctions[$name] = [
+                'callable' => $function->getHandler(),
+                'is_idempotent' => $isIdempotent,
+            ];
+        }
 
         foreach ($function->getOverloads() as $signature => $callable) {
             $signatureHash = self::hashSignature($signature);
@@ -179,18 +201,21 @@ final class OperationRegistry implements DefaultInterface
     {
         $candidates = $this->functionOverloads[$name] ?? [];
 
-        if ([] === $candidates) {
+        if ([] !== $candidates) {
+            $providedArgumentKinds = array_map(static fn(Value $v): ValueKind => $v->getKind(), $arguments);
+            $signatureHash = self::hashSignature($providedArgumentKinds);
+            $function = $candidates[$signatureHash] ?? null;
+            if (null !== $function) {
+                return [$function['is_idempotent'], $function['callable']];
+            }
+        }
+
+        $dynamic = $this->dynamicFunctions[$name] ?? null;
+        if (null === $dynamic) {
             return null;
         }
 
-        $providedArgumentKinds = array_map(static fn(Value $v): ValueKind => $v->getKind(), $arguments);
-        $signatureHash = self::hashSignature($providedArgumentKinds);
-        $function = $candidates[$signatureHash] ?? null;
-        if (null === $function) {
-            return null;
-        }
-
-        return [$function['is_idempotent'], $function['callable']];
+        return [$dynamic['is_idempotent'], $dynamic['callable']];
     }
 
     /**
