@@ -102,9 +102,16 @@ final readonly class FormatHandler implements FunctionOverloadHandlerInterface
             }
 
             if ($value instanceof StringValue) {
-                return '' === $value->value
-                    ? new DateTimeImmutable('now', $timezone)
-                    : new DateTimeImmutable($value->value, $timezone);
+                if ('' === $value->value) {
+                    return new DateTimeImmutable('now', $timezone);
+                }
+
+                // A string carrying its own offset names an instant, and the
+                // constructor honors that offset over the timezone given here.
+                // Converting after is what renders that instant where the host
+                // reads it; for a string without an offset the conversion is a
+                // no-op, because it was read in this timezone already.
+                return (new DateTimeImmutable($value->value, $timezone))->setTimezone($timezone);
             }
         } catch (Throwable $exception) {
             throw new EvaluationException($exception->getMessage(), $call->getSpan(), $exception);
