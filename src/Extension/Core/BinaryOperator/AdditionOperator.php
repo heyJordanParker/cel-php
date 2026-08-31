@@ -29,6 +29,7 @@ final readonly class AdditionOperator implements BinaryOperatorOverloadInterface
         yield [ValueKind::Integer, ValueKind::Integer] => new IntegerIntegerHandler();
         yield [ValueKind::UnsignedInteger, ValueKind::UnsignedInteger] => new UnsignedIntegerUnsignedIntegerHandler();
         yield [ValueKind::Float, ValueKind::Float] => new FloatFloatHandler();
+        yield from NumericPromotion::overloads(new FloatFloatHandler());
         yield [ValueKind::String, ValueKind::String] => new StringStringHandler();
         yield [ValueKind::Bytes, ValueKind::Bytes] => new BytesBytesHandler();
         yield [ValueKind::List, ValueKind::List] => new ListListHandler();

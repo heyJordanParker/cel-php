@@ -26,5 +26,6 @@ final readonly class MultiplicationOperator implements BinaryOperatorOverloadInt
         yield [ValueKind::Integer, ValueKind::Integer] => new IntegerIntegerHandler();
         yield [ValueKind::UnsignedInteger, ValueKind::UnsignedInteger] => new UnsignedIntegerUnsignedIntegerHandler();
         yield [ValueKind::Float, ValueKind::Float] => new FloatFloatHandler();
+        yield from NumericPromotion::overloads(new FloatFloatHandler());
     }
 }

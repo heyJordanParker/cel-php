@@ -76,6 +76,15 @@ final class MathExtensionTest extends RuntimeTestCase
             [],
             new EvaluationException('max() only supports lists of integers and floats, got `string`', new Span(0, 12)),
         ];
+        yield 'Math max: two integers' => ['max(1, 5)', [], new IntegerValue(5)];
+        yield 'Math max: two floats' => ['max(1.5, 0.5)', [], new FloatValue(1.5)];
+        yield 'Math max: integer and float' => ['max(0, 2.5)', [], new FloatValue(2.5)];
+        yield 'Math max: float floor wins over a smaller value' => ['max(0.0, -2.5)', [], new FloatValue(0.0)];
+        yield 'Math max: an absent operand given a value by the caller' => [
+            'max(0.0, discount ?? 0.0)',
+            ['discount' => null],
+            new FloatValue(0.0),
+        ];
 
         // mean()
         yield 'Math mean: list of integers' => ['mean([1, 2, 3])', [], new FloatValue(2.0)];
@@ -128,18 +137,12 @@ final class MathExtensionTest extends RuntimeTestCase
         // sum()
         yield 'Math sum: list of integers' => ['sum([1, 2, 3])', [], new IntegerValue(6)];
         yield 'Math sum: empty list' => ['sum([])', [], new IntegerValue(0)];
-        yield 'Math sum error: list of floats' => [
-            'sum([1.0, 2.0])',
-            [],
-            new EvaluationException('sum() only supports lists of integers, got Cel\Value\FloatValue', new Span(0, 15)),
-        ];
-        yield 'Math sum error: list with non-integer' => [
+        yield 'Math sum: list of floats' => ['sum([1.0, 2.0])', [], new FloatValue(3.0)];
+        yield 'Math sum: list of mixed numbers' => ['sum([1, 2.5])', [], new FloatValue(3.5)];
+        yield 'Math sum error: list with non-numeric' => [
             'sum([1, "a"])',
             [],
-            new EvaluationException(
-                'sum() only supports lists of integers, got Cel\Value\StringValue',
-                new Span(0, 12),
-            ),
+            new EvaluationException('sum() only supports lists of integers and floats, got `string`', new Span(0, 12)),
         ];
 
         // toBase()

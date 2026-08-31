@@ -21,6 +21,7 @@ final readonly class CoreExtension implements ExtensionInterface
             new Function\StringFunction(),
             new Function\UIntFunction(),
             new Function\FloatFunction(),
+            new Function\DoubleFunction(),
             new Function\BoolFunction(),
             new Function\SizeFunction(),
             new Function\BytesFunction(),

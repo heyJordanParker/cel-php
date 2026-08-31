@@ -49,7 +49,14 @@ final readonly class CallExpression extends Expression
     #[Override]
     public function getChildren(): array
     {
-        return [$this->function, ...$this->arguments->elements];
+        // The target belongs here: without it a walk of the tree cannot reach
+        // the receiver of a method call, so `article.links.map(l, l.title)`
+        // hides `article.links` from anything that visits children.
+        if (null === $this->target) {
+            return [$this->function, ...$this->arguments->elements];
+        }
+
+        return [$this->target, $this->function, ...$this->arguments->elements];
     }
 
     #[Override]

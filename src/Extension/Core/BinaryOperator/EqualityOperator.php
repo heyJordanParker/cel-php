@@ -43,6 +43,7 @@ final readonly class EqualityOperator implements BinaryOperatorOverloadInterface
             $isEqual,
         );
         yield [ValueKind::Float, ValueKind::Float] => new FloatFloatHandler($isEqual);
+        yield from NumericPromotion::overloads(new FloatFloatHandler($isEqual));
         yield [ValueKind::String, ValueKind::String] => new StringStringHandler($isEqual);
         yield [ValueKind::Bytes, ValueKind::Bytes] => new BytesBytesHandler($isEqual);
         yield [ValueKind::Boolean, ValueKind::Boolean] => new BooleanBooleanHandler($isEqual);

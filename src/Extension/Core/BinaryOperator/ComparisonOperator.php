@@ -51,6 +51,7 @@ final readonly class ComparisonOperator implements BinaryOperatorOverloadInterfa
             $comparator,
         );
         yield [ValueKind::Float, ValueKind::Float] => new FloatFloatHandler($comparator);
+        yield from NumericPromotion::overloads(new FloatFloatHandler($comparator));
         yield [ValueKind::String, ValueKind::String] => new StringStringHandler($comparator);
         yield [ValueKind::Bytes, ValueKind::Bytes] => new BytesBytesHandler($comparator);
         yield [ValueKind::Boolean, ValueKind::Boolean] => new BooleanBooleanHandler($comparator);

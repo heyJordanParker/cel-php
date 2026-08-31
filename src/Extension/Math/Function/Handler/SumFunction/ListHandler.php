@@ -9,12 +9,12 @@ use Cel\Exception\InternalException;
 use Cel\Function\FunctionOverloadHandlerInterface;
 use Cel\Syntax\Member\CallExpression;
 use Cel\Util\ArgumentsUtil;
+use Cel\Value\FloatValue;
 use Cel\Value\IntegerValue;
 use Cel\Value\ListValue;
 use Cel\Value\Value;
 use Override;
-use Psl\Math;
-use Psl\Vec;
+use Psl\Str;
 
 final readonly class ListHandler implements FunctionOverloadHandlerInterface
 {
@@ -22,32 +22,47 @@ final readonly class ListHandler implements FunctionOverloadHandlerInterface
      * @param CallExpression $call The call expression.
      * @param list<Value> $arguments The function arguments.
      *
-     * @return IntegerValue The resulting value.
+     * @return FloatValue|IntegerValue The resulting value.
      *
      * @throws EvaluationException
      * @throws InternalException
      */
     #[Override]
-    public function __invoke(CallExpression $call, array $arguments): IntegerValue
+    public function __invoke(CallExpression $call, array $arguments): FloatValue|IntegerValue
     {
         $list = ArgumentsUtil::get($arguments, 0, ListValue::class);
         if ([] === $list->value) {
             return new IntegerValue(0);
         }
 
-        try {
-            return new IntegerValue(Math\sum(Vec\map($list->value, static function (Value $v) use ($call): int {
-                if ($v instanceof IntegerValue) {
-                    return $v->value;
-                }
+        // A list of prices totals a price, so a float anywhere in the list makes
+        // the total a float; an all-integer list still totals an integer.
+        $total = 0;
+        $isFloat = false;
+        foreach ($list->value as $item) {
+            if ($item instanceof IntegerValue) {
+                $total += $item->value;
 
-                throw new EvaluationException(
-                    'sum() only supports lists of integers, got ' . $v::class,
-                    $call->getSpan(),
-                );
-            })));
-        } catch (Math\Exception\ExceptionInterface $e) {
-            throw new EvaluationException($e->getMessage(), $call->getSpan(), $e);
+                continue;
+            }
+
+            if ($item instanceof FloatValue) {
+                $total += $item->value;
+                $isFloat = true;
+
+                continue;
+            }
+
+            throw new EvaluationException(
+                Str\format('sum() only supports lists of integers and floats, got `%s`', $item->getType()),
+                $call->getSpan(),
+            );
         }
+
+        if ($isFloat) {
+            return new FloatValue((float) $total);
+        }
+
+        return new IntegerValue((int) $total);
     }
 }
