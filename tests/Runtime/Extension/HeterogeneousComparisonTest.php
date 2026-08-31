@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace Cel\Tests\Runtime\Extension;
 
 use Cel\Exception\EvaluationException;
-use Cel\Exception\NoSuchKeyException;
 use Cel\Exception\UnsupportedOperationException;
 use Cel\Span\Span;
 use Cel\Tests\Runtime\RuntimeTestCase;
 use Cel\Value\BooleanValue;
 use Cel\Value\IntegerValue;
+use Cel\Value\NullValue;
 use Cel\Value\StringValue;
 use Cel\Value\Value;
 use Override;
@@ -137,27 +137,17 @@ final class HeterogeneousComparisonTest extends RuntimeTestCase
         yield 'uint index on int key' => ['{1: "hello"}[1u]', [], new StringValue('hello')];
         yield 'double index on uint key' => ['{1u: true}[1.0]', [], new BooleanValue(true)];
         yield 'int index on uint key' => ['{1u: "v"}[1]', [], new StringValue('v')];
-        yield 'missing integer key' => [
-            '{1: "x"}[2]',
-            [],
-            new NoSuchKeyException('Key `2` does not exist in map', new Span(0, 0)),
-        ];
-        yield 'non-integral double key is missing' => [
-            '{1: "x"}[1.5]',
-            [],
-            new NoSuchKeyException('Key `double` does not exist in map', new Span(0, 0)),
-        ];
+        // A missing key reads as null rather than throwing, so a chain over an
+        // absent link cascades instead of failing the whole expression.
+        yield 'missing integer key' => ['{1: "x"}[2]', [], new NullValue()];
+        yield 'non-integral double key is missing' => ['{1: "x"}[1.5]', [], new NullValue()];
         yield 'boolean key is present' => ['{true: "yes", false: "no"}[true]', [], new StringValue('yes')];
         yield 'boolean key does not collide with integer key' => [
             'size({true: 1, false: 2, 1: 3, 0: 4})',
             [],
             new IntegerValue(4),
         ];
-        yield 'absent boolean key' => [
-            '{1: "x"}[true]',
-            [],
-            new NoSuchKeyException('Key `true` does not exist in map', new Span(0, 0)),
-        ];
+        yield 'absent boolean key' => ['{1: "x"}[true]', [], new NullValue()];
         yield 'string key does not collide with integer key' => [
             'size({"1": "a", 1: "b"})',
             [],
