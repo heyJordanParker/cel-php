@@ -6,7 +6,10 @@ namespace Cel\Template;
 
 use Cel\Parser\Parser;
 use Cel\Runtime\Configuration;
+use Cel\Syntax\Literal\LiteralExpression;
 use Cel\Syntax\Member\IdentifierExpression;
+use Cel\Syntax\Member\IndexExpression;
+use Cel\Syntax\Member\MemberAccessExpression;
 use Cel\Syntax\Node;
 use InvalidArgumentException;
 use Throwable;
@@ -16,7 +19,11 @@ use function Cel\evaluate;
 use function array_key_exists;
 use function array_keys;
 use function array_map;
+use function array_unshift;
+use function array_values;
 use function explode;
+use function implode;
+use function is_int;
 use function is_array;
 use function is_bool;
 use function is_scalar;
@@ -141,6 +148,157 @@ final readonly class Template
         }
 
         return array_keys($roots);
+    }
+
+    /**
+     * The member chains the bindings in a value read, grouped by their root
+     * variable — `['order' => [['total']]]` for `{{ order.total }}`.
+     *
+     * `roots()` answers which variables a value reaches. This answers how far
+     * into each one it reaches, which is what a caller needs to read exactly the
+     * fields a document names instead of whole objects. A root read bare
+     * (`{{ order }}`) contributes the empty chain, which means the whole value.
+     *
+     * A literal index is a segment of its own, so `offers[1].price` names one
+     * item. Anything else — a computed index, a map key held in a variable —
+     * cannot be named, so the chain stops at the collection and the caller reads
+     * across it. A method call is not a field: `links.map(l, l.title)` yields
+     * `links`, and the lambda body's `l` is a root like any other, resolving to
+     * nothing when it is supplied.
+     *
+     * @return array<string, list<list<string|int>>>
+     */
+    public function paths(mixed $value): array
+    {
+        if (is_array($value)) {
+            $paths = [];
+            foreach ($value as $item) {
+                foreach ($this->paths($item) as $root => $chains) {
+                    foreach ($chains as $chain) {
+                        $paths[$root][] = $chain;
+                    }
+                }
+            }
+
+            return array_map(self::unique(...), $paths);
+        }
+
+        if (!is_string($value)) {
+            return [];
+        }
+
+        $paths = [];
+        foreach ($this->expressions($value) as $expression) {
+            foreach (self::chains($expression) as [$root, $chain]) {
+                $paths[$root][] = $chain;
+            }
+        }
+
+        return array_map(self::unique(...), $paths);
+    }
+
+    /**
+     * @param list<list<string|int>> $chains
+     *
+     * @return list<list<string|int>>
+     */
+    private static function unique(array $chains): array
+    {
+        $seen = [];
+        foreach ($chains as $chain) {
+            $seen[implode("\0", array_map(strval(...), $chain))] = $chain;
+        }
+
+        return array_values($seen);
+    }
+
+    /**
+     * Every rooted chain in an expression, as `[root, segments]` pairs.
+     *
+     * @return list<array{0: string, 1: list<string|int>}>
+     */
+    private static function chains(string $expression): array
+    {
+        if ('' === $expression) {
+            return [];
+        }
+
+        try {
+            $node = Parser::default()->parseString($expression);
+        } catch (Throwable) {
+            return [];
+        }
+
+        $chains = [];
+        self::collect($node, $chains);
+
+        return $chains;
+    }
+
+    /**
+     * @param list<array{0: string, 1: list<string|int>}> $chains
+     */
+    private static function collect(Node $node, array &$chains): void
+    {
+        if ($node instanceof MemberAccessExpression || $node instanceof IndexExpression) {
+            $segments = [];
+            $current = $node;
+
+            while (true) {
+                if ($current instanceof MemberAccessExpression) {
+                    array_unshift($segments, $current->field->name);
+                    $current = $current->operand;
+
+                    continue;
+                }
+
+                if ($current instanceof IndexExpression) {
+                    // The index is an expression of its own and may read
+                    // variables: `items[position.current]` reads `position` too.
+                    self::collect($current->index, $chains);
+
+                    $literal = $current->index instanceof LiteralExpression
+                        ? $current->index->getValue()
+                        : null;
+
+                    if (is_int($literal) || is_string($literal)) {
+                        array_unshift($segments, $literal);
+                    } else {
+                        // Nothing past an unnameable index belongs to a path: the
+                        // chain is the collection, and every item is read.
+                        $segments = [];
+                    }
+
+                    $current = $current->operand;
+
+                    continue;
+                }
+
+                break;
+            }
+
+            if ($current instanceof IdentifierExpression) {
+                $chains[] = [$current->identifier->name, $segments];
+
+                return;
+            }
+
+            // The chain bottoms out on something that is not a variable — a call
+            // or a literal — so it names no path, but its own tree may.
+            self::collect($current, $chains);
+
+            return;
+        }
+
+        if ($node instanceof IdentifierExpression) {
+            $chains[] = [$node->identifier->name, []];
+
+            return;
+        }
+
+        foreach ($node->getChildren() as $child) {
+            self::collect($child, $chains);
+        }
     }
 
     /**

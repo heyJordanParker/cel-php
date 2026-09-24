@@ -188,6 +188,96 @@ final class TemplateTest extends TestCase
         static::assertSame([], $this->template->roots('{{ "order.total" }}'));
     }
 
+    // --- Paths ---
+
+    public function testPathsNamesTheFieldsABindingReads(): void
+    {
+        static::assertSame(['order' => [['total']]], $this->template->paths('{{ order.total }}'));
+    }
+
+    public function testPathsKeepsTheWholeChain(): void
+    {
+        static::assertSame(['a' => [['b', 'c']]], $this->template->paths('{{ a.b.c }}'));
+    }
+
+    public function testPathsReadsALiteralIndexAsItsOwnSegment(): void
+    {
+        static::assertSame(
+            ['funnel' => [['currentStep', 'offers', 1, 'price']]],
+            $this->template->paths('{{ funnel.currentStep.offers[1].price }}'),
+        );
+    }
+
+    public function testPathsStopsAtAnIndexItCannotName(): void
+    {
+        // Nothing past it can be named, so the collection is the path and the
+        // caller reads across every item. The index is a variable of its own.
+        static::assertSame(
+            ['position' => [[]], 'offers' => [[]]],
+            $this->template->paths('{{ offers[position].price }}'),
+        );
+    }
+
+    public function testPathsNamesTheIndexExpressionsOwnReads(): void
+    {
+        $paths = $this->template->paths('{{ offers[position.current].price }}');
+
+        static::assertSame([['current']], $paths['position']);
+    }
+
+    public function testPathsGivesABareRootTheEmptyChain(): void
+    {
+        static::assertSame(['order' => [[]]], $this->template->paths('{{ order }}'));
+    }
+
+    public function testPathsDoesNotNameAFunction(): void
+    {
+        static::assertSame(['cart' => [['items']]], $this->template->paths('{{ size(cart.items) }}'));
+    }
+
+    public function testPathsDoesNotNameAMethod(): void
+    {
+        $paths = $this->template->paths('{{ article.links.map(l, l.title) }}');
+
+        static::assertSame([['links']], $paths['article']);
+        // The lambda names `l` bare where it declares it, then reads `l.title`.
+        static::assertSame([[], ['title']], $paths['l']);
+    }
+
+    public function testPathsGathersEveryChainOfOneRoot(): void
+    {
+        static::assertSame(
+            ['order' => [['total'], ['currency']]],
+            $this->template->paths('{{ order.total }} {{ order.currency }}'),
+        );
+    }
+
+    public function testPathsNamesOneChainOnce(): void
+    {
+        static::assertSame(
+            ['order' => [['total']]],
+            $this->template->paths('{{ order.total }} {{ order.total }}'),
+        );
+    }
+
+    public function testPathsWalksAnArrayOfValues(): void
+    {
+        static::assertSame(
+            ['a' => [['b']], 'c' => [['d']]],
+            $this->template->paths(['{{ a.b }}', '{{ c.d }}']),
+        );
+    }
+
+    public function testPathsNamesNothingForABindingThatDoesNotParse(): void
+    {
+        static::assertSame([], $this->template->paths('{{ a. }}'));
+    }
+
+    public function testPathsNamesNothingInsideAStringLiteral(): void
+    {
+        static::assertSame([], $this->template->paths('{{ "order.total" }}'));
+    }
+
     // --- The chain opener ---
 
     public function testChainIsOrdinaryTextWhenOff(): void
