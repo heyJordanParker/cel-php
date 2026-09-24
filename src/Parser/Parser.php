@@ -48,6 +48,8 @@ use Closure;
 use Override;
 use SensitiveParameter;
 
+use function filter_var;
+use function is_int;
 use function is_numeric;
 use function ltrim;
 use function rtrim;
@@ -56,6 +58,8 @@ use function str_starts_with;
 use function strlen;
 use function strtolower;
 use function substr;
+
+use const FILTER_VALIDATE_INT;
 
 /**
  * A recursive-descent parser for the Common Expression Language (CEL).
@@ -620,10 +624,11 @@ final class Parser implements ParserInterface
         }
 
         // A magnitude that no longer round-trips through a native int has
-        // overflowed the signed range and is kept as a string.
-        $asInt = (int) $digits;
+        // overflowed the signed range and is kept as a string. An `(int)` cast
+        // would clamp it with a warning on PHP 8.5.
+        $number = filter_var($digits, FILTER_VALIDATE_INT);
 
-        return (string) $asInt === $digits ? $asInt : $digits;
+        return is_int($number) && (string) $number === $digits ? $number : $digits;
     }
 
     /**

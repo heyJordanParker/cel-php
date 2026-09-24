@@ -11,6 +11,7 @@ use Cel\Value\StringValue;
 use Cel\Value\UnsignedIntegerValue;
 use Cel\Value\Value;
 
+use function filter_var;
 use function floor;
 use function is_finite;
 use function is_int;
@@ -19,6 +20,7 @@ use function str_starts_with;
 use function strlen;
 use function substr;
 
+use const FILTER_VALIDATE_INT;
 use const PHP_INT_MAX;
 use const PHP_INT_MIN;
 
@@ -150,8 +152,8 @@ final readonly class MapKeyUtil
 
         if (str_starts_with($key, self::NUMBER_TAG)) {
             $decimal = substr($key, strlen(self::NUMBER_TAG));
-            $asInt = (int) $decimal;
-            if ((string) $asInt === $decimal) {
+            $asInt = self::decimalToInt($decimal);
+            if (null !== $asInt) {
                 return new IntegerValue($asInt);
             }
 
@@ -185,12 +187,23 @@ final readonly class MapKeyUtil
 
         if (str_starts_with($key, self::NUMBER_TAG)) {
             $decimal = substr($key, strlen(self::NUMBER_TAG));
-            $asInt = (int) $decimal;
 
-            return (string) $asInt === $decimal ? $asInt : $decimal;
+            return self::decimalToInt($decimal) ?? $decimal;
         }
 
         return $key;
+    }
+
+    /**
+     * Converts a decimal that round-trips through a native int to that int.
+     * Returns null for a decimal beyond the signed-integer range, which an
+     * `(int)` cast would clamp with a warning on PHP 8.5.
+     */
+    private static function decimalToInt(string $decimal): null|int
+    {
+        $number = filter_var($decimal, FILTER_VALIDATE_INT);
+
+        return is_int($number) && (string) $number === $decimal ? $number : null;
     }
 
     /**
