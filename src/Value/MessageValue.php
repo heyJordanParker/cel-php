@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cel\Value;
 
 use Cel\Exception\UnsupportedOperationException;
+use Cel\Message\FieldProviderInterface;
 use Cel\Message\MessageInterface;
 use Cel\Message\ZeroValueInterface;
 use Override;
@@ -48,6 +49,11 @@ final readonly class MessageValue extends Value
             return false;
         }
 
+        // A field provider holds no fields to compare, so it equals only itself.
+        if ($this->message instanceof FieldProviderInterface) {
+            return $this->message === $other->message;
+        }
+
         if ($this->message::class !== $other->message::class) {
             return false;
         }
@@ -82,18 +88,28 @@ final readonly class MessageValue extends Value
     }
 
     /**
-     * Checks if a field exists.
+     * Checks if a field exists, asking a {@see FieldProviderInterface} message
+     * itself.
      */
     public function hasField(string $name): bool
     {
+        if ($this->message instanceof FieldProviderInterface) {
+            return $this->message->hasField($name);
+        }
+
         return isset($this->fields[$name]);
     }
 
     /**
-     * Retrieves a field by name.
+     * Retrieves a field by name, asking a {@see FieldProviderInterface} message
+     * for it at the moment it is read.
      */
     public function getField(string $name): null|Value
     {
+        if ($this->message instanceof FieldProviderInterface) {
+            return $this->message->getField($name);
+        }
+
         return $this->fields[$name] ?? null;
     }
 }
