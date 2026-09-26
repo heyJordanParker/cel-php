@@ -29,24 +29,24 @@ final class TemplateTest extends TestCase
         $this->withChains = new Template(new Configuration(), enableChains: true);
     }
 
-    // --- Rendering a whole binding ---
+    // --- Rendering a whole expression ---
 
-    public function testWholeBindingKeepsItsValueType(): void
+    public function testWholeExpressionKeepsItsValueType(): void
     {
         static::assertSame(12, $this->template->render('{{ order.total }}', ['order' => ['total' => 12]]));
     }
 
-    public function testWholeExecutableBindingKeepsItsValueType(): void
+    public function testWholeExecutableExpressionKeepsItsValueType(): void
     {
         static::assertSame(12, $this->template->render('{{{ order.total }}}', ['order' => ['total' => 12]]));
     }
 
-    public function testWholeBindingToleratesSurroundingWhitespace(): void
+    public function testWholeExpressionToleratesSurroundingWhitespace(): void
     {
         static::assertSame(3, $this->template->render('  {{ total }}  ', ['total' => 3]));
     }
 
-    public function testValueWithoutABindingRendersUnchanged(): void
+    public function testValueWithoutAnExpressionRendersUnchanged(): void
     {
         static::assertSame('plain text', $this->template->render('plain text', []));
     }
@@ -59,14 +59,14 @@ final class TemplateTest extends TestCase
         );
     }
 
-    // --- Rendering bindings inside text ---
+    // --- Rendering expressions inside text ---
 
-    public function testBindingSurroundedByTextInterpolates(): void
+    public function testExpressionSurroundedByTextInterpolates(): void
     {
         static::assertSame('Hi Ada!', $this->template->render('Hi {{ name }}!', ['name' => 'Ada']));
     }
 
-    public function testSeveralBindingsInterpolate(): void
+    public function testSeveralExpressionsInterpolate(): void
     {
         static::assertSame('1 and 2', $this->template->render('{{ a }} and {{ b }}', ['a' => 1, 'b' => 2]));
     }
@@ -82,7 +82,7 @@ final class TemplateTest extends TestCase
         static::assertSame('[]', $this->template->render('[{{ missing }}]', []));
     }
 
-    public function testFailingBindingRendersAsNothing(): void
+    public function testFailingExpressionRendersAsNothing(): void
     {
         static::assertSame('[]', $this->template->render('[{{ 1 + "a" }}]', []));
     }
@@ -92,8 +92,8 @@ final class TemplateTest extends TestCase
     public function testEscapedOpenerRendersAsALiteral(): void
     {
         static::assertSame(
-            '{{ not a binding }}',
-            $this->template->render('\\{{ not a binding }}', []),
+            '{{ not an expression }}',
+            $this->template->render('\\{{ not an expression }}', []),
         );
     }
 
@@ -111,22 +111,22 @@ final class TemplateTest extends TestCase
 
     // --- Validity ---
 
-    public function testValidBindingIsValid(): void
+    public function testValidExpressionIsValid(): void
     {
         static::assertTrue($this->template->isValid('{{ order.total > 0 }}'));
     }
 
-    public function testValueWithoutABindingIsValid(): void
+    public function testValueWithoutAnExpressionIsValid(): void
     {
         static::assertTrue($this->template->isValid('plain'));
     }
 
-    public function testBindingThatDoesNotParseIsInvalid(): void
+    public function testExpressionThatDoesNotParseIsInvalid(): void
     {
         static::assertFalse($this->template->isValid('{{ order. }}'));
     }
 
-    public function testEmptyBindingIsInvalid(): void
+    public function testEmptyExpressionIsInvalid(): void
     {
         static::assertFalse($this->template->isValid('{{}}'));
     }
@@ -148,7 +148,7 @@ final class TemplateTest extends TestCase
 
     // --- Roots ---
 
-    public function testRootsNamesTheVariableABindingReads(): void
+    public function testRootsNamesTheVariableAnExpressionReads(): void
     {
         static::assertSame(['order'], $this->template->roots('{{ order.total }}'));
     }
@@ -163,7 +163,7 @@ final class TemplateTest extends TestCase
         static::assertSame(['cart'], $this->template->roots('{{ size(cart.items) }}'));
     }
 
-    public function testRootsNamesEveryVariableAcrossBindings(): void
+    public function testRootsNamesEveryVariableAcrossExpressions(): void
     {
         static::assertSame(['a', 'b'], $this->template->roots('{{ a }} x {{ b.c }}'));
     }
@@ -178,7 +178,7 @@ final class TemplateTest extends TestCase
         static::assertContains('article', $this->template->roots('{{ article.links.map(l, l.title) }}'));
     }
 
-    public function testRootsNamesNothingForABindingThatDoesNotParse(): void
+    public function testRootsNamesNothingForAnExpressionThatDoesNotParse(): void
     {
         static::assertSame([], $this->template->roots('{{ a. }}'));
     }
@@ -190,7 +190,7 @@ final class TemplateTest extends TestCase
 
     // --- Paths ---
 
-    public function testPathsNamesTheFieldsABindingReads(): void
+    public function testPathsNamesTheFieldsAnExpressionReads(): void
     {
         static::assertSame(['order' => [['total']]], $this->template->paths('{{ order.total }}'));
     }
@@ -268,7 +268,7 @@ final class TemplateTest extends TestCase
         );
     }
 
-    public function testPathsNamesNothingForABindingThatDoesNotParse(): void
+    public function testPathsNamesNothingForAnExpressionThatDoesNotParse(): void
     {
         static::assertSame([], $this->template->paths('{{ a. }}'));
     }
@@ -322,19 +322,19 @@ final class TemplateTest extends TestCase
 
     // --- The stored body ---
 
-    public function testBindingWrapsABody(): void
+    public function testExpressionWrapsABody(): void
     {
-        static::assertSame('{{ contact.optedIn }}', Template::binding('contact.optedIn'));
+        static::assertSame('{{ contact.optedIn }}', Template::expression('contact.optedIn'));
     }
 
-    public function testBindingRefusesABodyThatWouldCloseEarly(): void
+    public function testExpressionRefusesABodyThatWouldCloseEarly(): void
     {
         static::expectException(InvalidArgumentException::class);
 
-        Template::binding('a }} b');
+        Template::expression('a }} b');
     }
 
-    public function testBodyReadsBackOutOfAWholeBinding(): void
+    public function testBodyReadsBackOutOfAWholeExpression(): void
     {
         static::assertSame('contact.optedIn', Template::body('{{ contact.optedIn }}'));
     }
@@ -348,7 +348,7 @@ final class TemplateTest extends TestCase
 
     // --- The failure policy ---
 
-    public function testFailedBindingResolvesToNullByDefault(): void
+    public function testFailedExpressionResolvesToNullByDefault(): void
     {
         static::assertNull($this->template->render('{{ 1 + "a" }}', []));
     }
@@ -374,12 +374,12 @@ final class TemplateTest extends TestCase
         $template = new Template(
             new Configuration(),
             onFailure: static function(string $expression, Throwable $error): never {
-                throw new RuntimeException('bad binding: ' . $expression);
+                throw new RuntimeException('bad expression: ' . $expression);
             },
         );
 
         static::expectException(RuntimeException::class);
-        static::expectExceptionMessage('bad binding');
+        static::expectExceptionMessage('bad expression');
 
         $template->render('{{ 1 + "a" }}', []);
     }

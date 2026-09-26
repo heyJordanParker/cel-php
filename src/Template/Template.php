@@ -41,21 +41,21 @@ use function trim;
 /**
  * Expressions written inside ordinary text: `Hello {{ customer.firstName }}`.
  *
- * The grammar is {@see Grammar}. A value that is one whole binding evaluates to
- * that binding's value, keeping its type; a binding surrounded by text renders
+ * The grammar is {@see Grammar}. A value that is one whole expression evaluates to
+ * that expression's value, keeping its type; an expression surrounded by text renders
  * into the text as a string. Arrays are walked, so a whole document of authored
  * values can be handed in at once.
  *
- * What happens when a binding fails is the caller's policy, not this layer's: a
- * host rendering a page usually wants an unresolvable binding to come out empty
+ * What happens when an expression fails is the caller's policy, not this layer's: a
+ * host rendering a page usually wants an unresolvable expression to come out empty
  * rather than to fail the page, while a host validating one wants to hear about
- * it. Pass `$onFailure` to decide; the default resolves a failed binding to null.
+ * it. Pass `$onFailure` to decide; the default resolves a failed expression to null.
  */
 final readonly class Template
 {
     /**
-     * @param Configuration $configuration The runtime bindings evaluate against.
-     * @param bool $enableChains Whether `@root.field` also opens a binding. Off by default:
+     * @param Configuration $configuration The runtime expressions evaluate against.
+     * @param bool $enableChains Whether `@root.field` also opens an expression. Off by default:
      *                           `{{ }}` is the template form, while the bare chain is an
      *                           authoring affordance a host opts into.
      * @param null|(callable(string, Throwable): mixed) $onFailure Given the expression and the
@@ -69,14 +69,14 @@ final readonly class Template
     ) {}
 
     /**
-     * Wraps a stored expression body in a binding.
+     * Wraps a stored expression body in its braces.
      *
      * A body is stored bare, because the surface an author types it into asks
-     * for a rule rather than for a binding, so every evaluation site has to put
-     * it back. A body carrying `}}` would close the binding early and evaluate
+     * for a rule rather than for an expression, so every evaluation site has to put
+     * it back. A body carrying `}}` would close the expression early and evaluate
      * something other than what its author wrote.
      */
-    public static function binding(string $body): string
+    public static function expression(string $body): string
     {
         if (str_contains($body, '}}')) {
             throw new InvalidArgumentException('An expression body cannot contain `}}`: ' . $body);
@@ -86,14 +86,14 @@ final readonly class Template
     }
 
     /**
-     * The bare body of a value that is one whole binding.
+     * The bare body of a value that is one whole expression.
      *
      * A value that interpolates has no single body to store, so it is refused.
      */
     public static function body(string $value): string
     {
         if (preg_match(Grammar::WHOLE_INERT, $value, $matches) !== 1) {
-            throw new InvalidArgumentException('Only a whole binding has an expression body.');
+            throw new InvalidArgumentException('Only a whole expression has an expression body.');
         }
 
         return $matches[1];
@@ -106,20 +106,20 @@ final readonly class Template
     }
 
     /**
-     * The variable names the bindings in a value read — `order` for
+     * The variable names the expressions in a value read — `order` for
      * `{{ order.total }}`, `cart` for `{{ money(cart.total) }}`. Arrays are
      * walked, so a whole document can be handed in.
      *
      * A caller needs these to know which variables a document reaches, so it
-     * can supply exactly those and no more. The names come from each binding's
+     * can supply exactly those and no more. The names come from each expression's
      * parse tree: an identifier used as a value is a variable, while a field
      * name and a function name are not identifier expressions at all and never
-     * appear. A binding that does not parse contributes nothing, because an
+     * appear. An expression that does not parse contributes nothing, because an
      * expression that cannot run reads no variable.
      *
      * A comprehension's loop variable is a name like any other here. It resolves
      * to nothing when supplied, so naming it costs nothing, where missing a real
-     * variable would blank the binding.
+     * variable would blank the expression.
      *
      * @return list<string>
      */
@@ -151,7 +151,7 @@ final readonly class Template
     }
 
     /**
-     * The member chains the bindings in a value read, grouped by their root
+     * The member chains the expressions in a value read, grouped by their root
      * variable — `['order' => [['total']]]` for `{{ order.total }}`.
      *
      * `roots()` answers which variables a value reaches. This answers how far
@@ -302,7 +302,7 @@ final readonly class Template
     }
 
     /**
-     * Every expression written in the value, taken from the bindings around
+     * Every expression written in the value, taken from the braces around
      * them. A chain contributes its own text, which is an expression already.
      *
      * @return list<string>
@@ -313,9 +313,9 @@ final readonly class Template
 
         $expressions = [];
 
-        preg_match_all(Grammar::BINDINGS, $unescaped, $bindings, PREG_SET_ORDER);
-        foreach ($bindings as $binding) {
-            $expressions[] = trim('' !== $binding[1] ? $binding[1] : ($binding[2] ?? ''));
+        preg_match_all(Grammar::EXPRESSIONS, $unescaped, $matches, PREG_SET_ORDER);
+        foreach ($matches as $match) {
+            $expressions[] = trim('' !== $match[1] ? $match[1] : ($match[2] ?? ''));
         }
 
         if ($this->enableChains) {
@@ -367,14 +367,14 @@ final readonly class Template
     }
 
     /**
-     * Whether the value holds a binding at all.
+     * Whether the value holds an expression at all.
      *
      * When `$values` is given, an `@` chain counts only where its root is one
      * of them, because an unresolvable chain stays literal text.
      *
      * @param null|array<string, mixed> $values
      */
-    public function containsBinding(string $value, null|array $values = null): bool
+    public function containsExpression(string $value, null|array $values = null): bool
     {
         if (preg_match('/(?<!\\\\)\{\{/', $value) === 1) {
             return true;
@@ -397,32 +397,32 @@ final readonly class Template
         return false;
     }
 
-    /** Whether the value holds a `{{{ }}}` binding. */
-    public static function containsExecutableBinding(string $value): bool
+    /** Whether the value holds a `{{{ }}}` expression. */
+    public static function containsExecutableExpression(string $value): bool
     {
         return preg_match('/(?<!\\\\)\{\{\{/', $value) === 1;
     }
 
     /**
-     * Whether the value holds a `{{ }}` binding once every `{{{ }}}` span is
+     * Whether the value holds a `{{ }}` expression once every `{{{ }}}` span is
      * removed.
      *
      * @param null|array<string, mixed> $values
      */
-    public function containsInertBinding(string $value, null|array $values = null): bool
+    public function containsInertExpression(string $value, null|array $values = null): bool
     {
         $withoutExecutable = preg_replace('/(?<!\\\\)\{\{\{\s*(.*?)\s*\}\}\}/s', '', $value);
 
-        return $this->containsBinding(is_string($withoutExecutable) ? $withoutExecutable : $value, $values);
+        return $this->containsExpression(is_string($withoutExecutable) ? $withoutExecutable : $value, $values);
     }
 
     /**
-     * Whether the value is one binding and nothing else, so its evaluated value
+     * Whether the value is one expression and nothing else, so its evaluated value
      * keeps its type instead of rendering into text.
      *
      * @param array<string, mixed> $values
      */
-    public function isWholeBinding(string $value, array $values): bool
+    public function isWholeExpression(string $value, array $values): bool
     {
         return preg_match(Grammar::WHOLE_EXECUTABLE, $value) === 1
             || preg_match(Grammar::WHOLE_INERT, $value) === 1
@@ -439,7 +439,7 @@ final readonly class Template
             && self::isBoundRoot($match[1], $values);
     }
 
-    /** Whether every binding in the value is a syntactically valid expression. */
+    /** Whether every expression in the value parses. */
     public function isValid(mixed $value): bool
     {
         if (is_array($value)) {
@@ -456,7 +456,7 @@ final readonly class Template
             return true;
         }
 
-        // An escaped `\{{` is a literal, so it neither opens a binding nor
+        // An escaped `\{{` is a literal, so it neither opens an expression nor
         // counts as a stray unescaped one.
         $unescaped = preg_replace('/' . preg_quote(Grammar::ESCAPED_OPEN, '/') . '/', '', $value);
         $unescaped = is_string($unescaped) ? $unescaped : $value;
@@ -468,13 +468,13 @@ final readonly class Template
             PREG_SET_ORDER | PREG_UNMATCHED_AS_NULL,
         );
 
-        $withoutBindings = $unescaped;
+        $withoutExpressions = $unescaped;
         foreach ($matches as $match) {
-            $withoutBindings = str_replace($match[0], '', $withoutBindings);
+            $withoutExpressions = str_replace($match[0], '', $withoutExpressions);
         }
 
-        // An opener with no closer is not a binding and never will be.
-        if (str_contains($withoutBindings, '{{')) {
+        // An opener with no closer is not an expression and never will be.
+        if (str_contains($withoutExpressions, '{{')) {
             return false;
         }
 
@@ -489,14 +489,14 @@ final readonly class Template
     }
 
     /**
-     * Renders every binding in the value against the variables.
+     * Renders every expression in the value against the variables.
      *
-     * A value that is one whole binding returns that binding's evaluated value
+     * A value that is one whole expression returns that expression's evaluated value
      * with its type intact. Anything else renders to a string. Arrays are
      * walked.
      *
      * `$fragment` is called for each piece of a rendered string — literal text
-     * with null, an evaluated binding with whether its author marked it
+     * with null, an evaluated expression with whether its author marked it
      * executable — so a host can treat the two differently on output. Without
      * it the pieces are concatenated.
      *
@@ -520,20 +520,20 @@ final readonly class Template
         }
 
         if (preg_match(Grammar::WHOLE_EXECUTABLE, $value, $match) === 1) {
-            $result = $this->evaluateBinding($match[1], $values);
+            $result = $this->evaluateExpression($match[1], $values);
 
             return null === $fragment ? $result : $fragment($result, true);
         }
 
         if (preg_match(Grammar::WHOLE_INERT, $value, $match) === 1) {
-            $result = $this->evaluateBinding($match[1], $values);
+            $result = $this->evaluateExpression($match[1], $values);
 
             return null === $fragment ? $result : $fragment($result, false);
         }
 
         if ($this->isWholeChain($value, $values)) {
             preg_match('/^\s*' . Grammar::AT_CHAIN . '\s*$/', $value, $match);
-            $result = $this->evaluateBinding($match[1], $values);
+            $result = $this->evaluateExpression($match[1], $values);
 
             return null === $fragment ? $result : $fragment($result, false);
         }
@@ -565,12 +565,12 @@ final readonly class Template
             if ($match[0][0][0] === '\\') {
                 $rendered .= (string) (null === $fragment ? '{{' : $fragment('{{', null));
             } elseif ($match[1][1] !== -1) {
-                $result = $this->evaluateBinding($match[1][0], $values);
+                $result = $this->evaluateExpression($match[1][0], $values);
                 $rendered .= (string) (
                     null === $fragment ? self::text($result) : $fragment($result, true)
                 );
             } elseif ($match[2][1] !== -1) {
-                $result = $this->evaluateBinding($match[2][0], $values);
+                $result = $this->evaluateExpression($match[2][0], $values);
                 $rendered .= (string) (
                     null === $fragment ? self::text($result) : $fragment($result, false)
                 );
@@ -579,7 +579,7 @@ final readonly class Template
                 // resolve, stays the text the author wrote.
                 $rendered .= (string) (null === $fragment ? $match[0][0] : $fragment($match[0][0], null));
             } else {
-                $result = $this->evaluateBinding($match[3][0], $values);
+                $result = $this->evaluateExpression($match[3][0], $values);
                 $rendered .= (string) (
                     null === $fragment ? self::text($result) : $fragment($result, false)
                 );
@@ -596,7 +596,7 @@ final readonly class Template
     /**
      * @param array<string, mixed> $values
      */
-    private function evaluateBinding(string $expression, array $values): mixed
+    private function evaluateExpression(string $expression, array $values): mixed
     {
         $expression = trim($expression);
 
@@ -634,7 +634,7 @@ final readonly class Template
     }
 
     /**
-     * A binding's value as text, matching what the `string()` conversion of the
+     * An expression's value as text, matching what the `string()` conversion of the
      * same value produces. A host wanting its own rendering — a currency, a
      * date, a boolean written some other way — passes `$fragment` to `render`
      * and receives the value before it becomes text.

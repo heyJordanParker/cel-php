@@ -9,8 +9,8 @@ namespace Cel\Template;
  *
  * Two openers reach the same expression language:
  *
- * - `{{ expression }}` — a bracketed binding the author closes. `{{{ }}}` is
- *   the same binding, marked by its author as carrying intent the host treats
+ * - `{{ expression }}` — a bracketed expression the author closes. `{{{ }}}` is
+ *   the same expression, marked by its author as carrying intent the host treats
  *   differently on output; the expression inside is identical either way and
  *   the language never sees the difference.
  * - `@root.field[0]` — a bare chain, ending by grammar at the first character
@@ -18,7 +18,7 @@ namespace Cel\Template;
  *   email address never starts one.
  *
  * A backslash before an opening `{{` is the one escape: `\{{` renders a literal
- * `{{`, which lets an author write a bare moustache without opening a binding.
+ * `{{`, which lets an author write a bare moustache without opening an expression.
  *
  * These patterns are the contract every implementation of this template layer
  * matches, so text authored once resolves the same wherever it renders.
@@ -36,24 +36,24 @@ final readonly class Grammar
     public const string ESCAPED_OPEN = '\\{{';
 
     /**
-     * A value that is one inert binding and nothing else, so its evaluated
+     * A value that is one inert expression and nothing else, so its evaluated
      * value is the result rather than text interpolated around it. The body may
-     * not carry the binding's own closer: without that guard `{{ a }} x {{ b }}`
-     * matches as a single binding whose body is not an expression.
+     * not carry the expression's own closer: without that guard `{{ a }} x {{ b }}`
+     * matches as one span whose body is not an expression.
      */
     public const string WHOLE_INERT = '/^\s*\{\{\s*((?:(?!\}\}).)*?)\s*\}\}\s*$/s';
 
     /** The `{{{ }}}` counterpart of {@see WHOLE_INERT}. */
     public const string WHOLE_EXECUTABLE = '/^\s*\{\{\{\s*((?:(?!\}\}\}).)*?)\s*\}\}\}\s*$/s';
 
-    /** Every binding of either form, for scanning bodies. */
-    public const string BINDINGS = '/(?<!\\\\)(?:\{\{\{\s*(.*?)\s*\}\}\}|\{\{\s*(.*?)\s*\}\})/s';
+    /** Every expression of either form, for scanning bodies. */
+    public const string EXPRESSIONS = '/(?<!\\\\)(?:\{\{\{\s*(.*?)\s*\}\}\}|\{\{\s*(.*?)\s*\}\})/s';
 
     /**
-     * Every escape and binding in one pass, in document order, so a render
+     * Every escape and expression in one pass, in document order, so a render
      * walks the text once.
      *
-     * A chain is always matched here. Whether a match is a binding or the text
+     * A chain is always matched here. Whether a match is an expression or the text
      * an author wrote is the caller's decision, because the chain opener is
      * one a host turns on.
      */
