@@ -154,10 +154,14 @@ final readonly class Utils
         $is_raw = strtolower($prefix ?? '') === 'r';
         $initial_offset = $scan_offset + strlen($terminator);
 
-        $final_offset = self::consumeLiteralString($input, $terminator, $is_raw, $initial_offset);
+        [$final_offset, $terminated] = self::consumeLiteralString($input, $terminator, $is_raw, $initial_offset);
 
         $value = $input->consume($final_offset);
-        $kind = strtolower($prefix ?? '') === 'b' ? TokenKind::BytesSequence : TokenKind::LiteralString;
+        $kind = match (true) {
+            !$terminated => TokenKind::Unrecognized,
+            strtolower($prefix ?? '') === 'b' => TokenKind::BytesSequence,
+            default => TokenKind::LiteralString,
+        };
 
         return [$kind, $value];
     }
@@ -187,31 +191,31 @@ final readonly class Utils
 
     /**
      * @param int<0, max> $scan_offset
-     * @return int<0, max>
+     * @return list{int<0, max>, bool} the offset after the literal, and whether its terminator closed it
      */
     private static function consumeLiteralString(
         InputInterface $input,
         string $terminator,
         bool $is_raw,
         int $scan_offset,
-    ): int {
+    ): array {
         $peeked = $input->peek($scan_offset, 1);
 
         // Base case: Unterminated string
         if ('' === $peeked) {
-            return $scan_offset;
+            return [$scan_offset, false];
         }
 
         // Base case: Found the terminator
         if ($input->peek($scan_offset, strlen($terminator)) === $terminator) {
-            return $scan_offset + strlen($terminator);
+            return [$scan_offset + strlen($terminator), true];
         }
 
         // Recursive step
         if ('\\' === $peeked && !$is_raw) {
             // If the next character after the backslash is the end of the input, it's a dangling backslash.
             if ($input->peek($scan_offset + 1, 1) === '') {
-                return $scan_offset + 1;
+                return [$scan_offset + 1, false];
             }
 
             // Skip the backslash and the character after it.

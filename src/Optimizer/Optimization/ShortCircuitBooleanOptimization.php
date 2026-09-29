@@ -11,14 +11,16 @@ use Cel\Syntax\Literal\BoolLiteralExpression;
 use Override;
 
 /**
- * Simplifies logical AND (&&) and OR (||) expressions where one side is a constant boolean.
+ * Replaces a logical AND (&&) or OR (||) with the constant that decides it.
  *
  * Optimizations:
  *
- * - `expr && true`  -> `expr`
  * - `expr && false` -> `false`
  * - `expr || true`  -> `true`
- * - `expr || false` -> `expr`
+ *
+ * The runtime gives the same answer whatever the other side holds, an error included. A
+ * constant that does not decide the result is left alone: `expr && true` is an error when
+ * `expr` is not a boolean, and replacing it with `expr` would change the result.
  *
  * @api
  */
@@ -31,38 +33,19 @@ final readonly class ShortCircuitBooleanOptimization implements OptimizationInte
             return null;
         }
 
-        if ($expression->operator->kind === BinaryOperatorKind::And) {
-            return $this->optimizeAnd($expression);
+        $deciding = match ($expression->operator->kind) {
+            BinaryOperatorKind::And => false,
+            BinaryOperatorKind::Or => true,
+            default => null,
+        };
+        if ($deciding === null) {
+            return null;
         }
 
-        if ($expression->operator->kind === BinaryOperatorKind::Or) {
-            return $this->optimizeOr($expression);
-        }
-
-        return null;
-    }
-
-    private function optimizeAnd(BinaryExpression $expr): null|Expression
-    {
-        if ($expr->left instanceof BoolLiteralExpression) {
-            return $expr->left->value ? $expr->right : $expr->left;
-        }
-
-        if ($expr->right instanceof BoolLiteralExpression) {
-            return $expr->right->value ? $expr->left : $expr->right;
-        }
-
-        return null;
-    }
-
-    private function optimizeOr(BinaryExpression $expr): null|Expression
-    {
-        if ($expr->left instanceof BoolLiteralExpression) {
-            return $expr->left->value ? $expr->left : $expr->right;
-        }
-
-        if ($expr->right instanceof BoolLiteralExpression) {
-            return $expr->right->value ? $expr->right : $expr->left;
+        foreach ([$expression->left, $expression->right] as $side) {
+            if ($side instanceof BoolLiteralExpression && $side->value === $deciding) {
+                return $side;
+            }
         }
 
         return null;

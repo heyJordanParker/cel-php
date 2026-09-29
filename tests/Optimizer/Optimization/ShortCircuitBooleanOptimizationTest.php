@@ -34,13 +34,13 @@ final class ShortCircuitBooleanOptimizationTest extends OptimizationTestCase
         $plus = new BinaryOperator(BinaryOperatorKind::Plus, Span::zero());
 
         // AND cases
-        yield 'expr && true -> expr' => [
+        yield 'expr && true -> no change, since a non-boolean expr is an error' => [
             new BinaryExpression($ident, $and, $true),
-            $ident,
+            null,
         ];
-        yield 'true && expr -> expr' => [
+        yield 'true && expr -> no change, since a non-boolean expr is an error' => [
             new BinaryExpression($true, $and, $ident),
-            $ident,
+            null,
         ];
         yield 'expr && false -> false' => [
             new BinaryExpression($ident, $and, $false),
@@ -64,13 +64,13 @@ final class ShortCircuitBooleanOptimizationTest extends OptimizationTestCase
             new BinaryExpression($true, $or, $ident),
             $true,
         ];
-        yield 'expr || false -> expr' => [
+        yield 'expr || false -> no change, since a non-boolean expr is an error' => [
             new BinaryExpression($ident, $or, $false),
-            $ident,
+            null,
         ];
-        yield 'false || expr -> expr' => [
+        yield 'false || expr -> no change, since a non-boolean expr is an error' => [
             new BinaryExpression($false, $or, $ident),
-            $ident,
+            null,
         ];
         yield 'expr || expr -> no change' => [
             new BinaryExpression($ident, $or, $ident),

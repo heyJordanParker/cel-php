@@ -432,10 +432,16 @@ final readonly class Template
      * reads no path), whether its root is a free variable, the segments as
      * written, and the node that ends each written segment.
      *
+     * Answers the collection the node's value holds items of, when that is a path:
+     * a `filter` keeps items of the collection it walks. Any other call builds new
+     * values, which no path names.
+     *
      * @param array<string, null|non-empty-list<string|int|null>> $scope What each bound variable resolves to.
      * @param list<array{path: null|non-empty-list<string|int|null>, free: bool, written: non-empty-list<string|int|null>, nodes: non-empty-list<Expression>}> $reads
+     *
+     * @return null|non-empty-list<string|int|null>
      */
-    private static function walk(Node $node, array $scope, array &$reads): void
+    private static function walk(Node $node, array $scope, array &$reads): null|array
     {
         if (
             $node instanceof IdentifierExpression
@@ -444,7 +450,7 @@ final readonly class Template
         ) {
             self::walkChain($node, $scope, $reads);
 
-            return;
+            return null;
         }
 
         $target = $node instanceof CallExpression ? $node->target : null;
@@ -466,7 +472,7 @@ final readonly class Template
                 self::walk($child, $scope, $reads);
             }
 
-            return;
+            return null;
         }
 
         $collection = self::walkChain($target, $scope, $reads);
@@ -486,6 +492,8 @@ final readonly class Template
         foreach (array_slice($arguments, count($roles)) as $argument) {
             self::walk($argument, $scope, $reads);
         }
+
+        return $node instanceof CallExpression && 'filter' === $node->function->name ? $collection : null;
     }
 
     /**
@@ -544,7 +552,8 @@ final readonly class Template
                 'nodes' => [$current, ...$nodes],
             ];
         } else {
-            self::walk($current, $scope, $reads);
+            $filtered = self::walk($current, $scope, $reads);
+            $path = [] === $segments ? $filtered : null;
         }
 
         foreach (array_reverse($indexes) as $index) {

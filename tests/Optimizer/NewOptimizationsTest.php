@@ -7,11 +7,14 @@ namespace Cel\Tests\Optimizer;
 use Cel\CommonExpressionLanguage;
 use Cel\Optimizer\Optimization\ConditionalSimplificationOptimization;
 use Cel\Optimizer\Optimization\ConstantFoldingOptimization;
-use Cel\Optimizer\Optimization\DoubleNegationOptimization;
-use Cel\Optimizer\Optimization\IdentityOperationOptimization;
 use Cel\Optimizer\Optimizer;
 use Cel\Parser\Parser;
+use Cel\Runtime\Runtime;
+use Cel\Value\Value;
+use Closure;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Throwable;
 
 final class NewOptimizationsTest extends TestCase
 {
@@ -30,38 +33,60 @@ final class NewOptimizationsTest extends TestCase
         static::assertSame(8, $receipt->result->getRawValue());
     }
 
-    public function testIdentityOperationOptimization(): void
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function provideCodeTheOptimizerMustNotChange(): iterable
     {
-        $cel = CommonExpressionLanguage::default();
-
-        // Test x + 0
-        $expr = $cel->parseString('x + 0');
-        $receipt = $cel->run($expr, ['x' => 5]);
-        static::assertSame(5, $receipt->result->getRawValue());
-
-        // Test x * 1
-        $expr = $cel->parseString('x * 1');
-        $receipt = $cel->run($expr, ['x' => 7]);
-        static::assertSame(7, $receipt->result->getRawValue());
-
-        // Test x / 1
-        $expr = $cel->parseString('x / 1');
-        $receipt = $cel->run($expr, ['x' => 10]);
-        static::assertSame(10, $receipt->result->getRawValue());
+        foreach ([
+            'true * 1',
+            '1 * true',
+            '"a" + 0',
+            '"a" - 0',
+            '"a" / 1',
+            'x * 0',
+            'x + 0',
+            '5 * 1.0',
+            '!!1',
+            '--"a"',
+            '1 && true',
+            'true && 1',
+            '1 || false',
+            'false || 1',
+            'null / 1',
+            'missing && false',
+            'missing || true',
+            'x * 1 > 2',
+            '!!(x > 1)',
+        ] as $code) {
+            yield $code => [$code];
+        }
     }
 
-    public function testDoubleNegationOptimization(): void
+    #[DataProvider('provideCodeTheOptimizerMustNotChange')]
+    public function testTheOptimizerNeverChangesAResult(string $code): void
     {
-        $cel = CommonExpressionLanguage::default();
+        $parsed = Parser::default()->parseString($code);
+        $variables = ['x' => 2.5];
 
-        // Test !!x
-        $expr = $cel->parseString('!!x');
-        $receipt = $cel->run($expr, ['x' => true]);
-        static::assertTrue($receipt->result->getRawValue());
+        static::assertSame(
+            $this->outcome(static fn (): Value => (new Runtime())->run($parsed, $variables)->result),
+            $this->outcome(static fn (): Value => (new Runtime())->run(Optimizer::default()->optimize($parsed), $variables)->result),
+        );
+    }
 
-        $expr = $cel->parseString('!!x');
-        $receipt = $cel->run($expr, ['x' => false]);
-        static::assertFalse($receipt->result->getRawValue());
+    /**
+     * @param Closure(): Value $run
+     */
+    private function outcome(Closure $run): string
+    {
+        try {
+            $result = $run();
+        } catch (Throwable $exception) {
+            return $exception::class;
+        }
+
+        return $result->getType() . ' ' . var_export($result->getRawValue(), true);
     }
 
     public function testConditionalSimplificationOptimization(): void
@@ -170,8 +195,6 @@ final class NewOptimizationsTest extends TestCase
         $expression = $parser->parseString('1 + 2');
 
         $optimizer->addOptimization(new ConstantFoldingOptimization());
-        $optimizer->addOptimization(new IdentityOperationOptimization());
-        $optimizer->addOptimization(new DoubleNegationOptimization());
         $optimizer->addOptimization(new ConditionalSimplificationOptimization());
 
         $optimized = $optimizer->optimize($expression);

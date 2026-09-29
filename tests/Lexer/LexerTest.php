@@ -189,6 +189,13 @@ final class LexerTest extends TestCase
 
         // Unrecognized
         yield 'Unrecognized character' => ['#', [[TokenKind::Unrecognized, '#', 0, 1]]];
+        yield 'Unterminated string' => ['"foo', [[TokenKind::Unrecognized, '"foo', 0, 4]]];
+        yield 'Unterminated single-quoted string' => ["'foo", [[TokenKind::Unrecognized, "'foo", 0, 4]]];
+        yield 'Unterminated triple-quoted string' => ['"""foo"', [[TokenKind::Unrecognized, '"""foo"', 0, 7]]];
+        yield 'Unterminated raw string' => ['r"foo', [[TokenKind::Unrecognized, 'r"foo', 0, 5]]];
+        yield 'Unterminated bytes' => ['b"foo', [[TokenKind::Unrecognized, 'b"foo', 0, 5]]];
+        yield 'String ending in a dangling escape' => ['"foo\\', [[TokenKind::Unrecognized, '"foo\\', 0, 5]]];
+        yield 'Lone quote' => ['"', [[TokenKind::Unrecognized, '"', 0, 1]]];
 
         // Edge cases
         yield 'Empty input' => ['', []];

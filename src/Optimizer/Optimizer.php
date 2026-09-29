@@ -45,8 +45,6 @@ final class Optimizer implements OptimizerInterface
     {
         $this->optimizations = $optimizations ?? [
             new Optimization\ConstantFoldingOptimization($runtime),
-            new Optimization\IdentityOperationOptimization(),
-            new Optimization\DoubleNegationOptimization(),
             new Optimization\ConditionalSimplificationOptimization(),
             new Optimization\ShortCircuitBooleanOptimization(),
             new Optimization\UnwrapParenthesesOptimization(),

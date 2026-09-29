@@ -417,6 +417,34 @@ final class TemplateTest extends TestCase
         static::assertSame([['a'], ['b']], Template::references('[a, b].map(x, x.y)'));
     }
 
+    public function testReferencesReadsAVariableOverAFilterThroughTheFilteredItems(): void
+    {
+        static::assertSame(
+            [['offers'], ['offers', null, 'active'], ['offers', null, 'name']],
+            Template::references('offers.filter(o, o.active).map(o, o.name)'),
+        );
+        static::assertSame(
+            [['offers'], ['offers', null, 'active'], ['offers', null, 'price'], ['offers', null, 'nope']],
+            Template::references('offers.filter(o, o.active).filter(p, p.price > 0).exists(q, q.nope)'),
+        );
+        static::assertSame(
+            [['offers'], ['offers', null, 'active'], ['offers', null, 'ok']],
+            Template::references('(offers.filter(o, o.active)).all(o, o.ok)'),
+        );
+    }
+
+    public function testReferencesReadsNoPathForAVariableOverBuiltItems(): void
+    {
+        static::assertSame(
+            [['offers'], ['offers', null, 'price']],
+            Template::references('offers.map(o, o.price).map(p, p.nope)'),
+        );
+        static::assertSame(
+            [['offers'], ['offers', null, 'price']],
+            Template::references('offers.map(o, o.price).filter(p, p > 1).map(q, q.x)'),
+        );
+    }
+
     public function testReferencesThrowsWhenTheCodeDoesNotParse(): void
     {
         static::expectException(ExceptionInterface::class);
