@@ -4,39 +4,55 @@ declare(strict_types=1);
 
 namespace Cel\Template;
 
+use Cel\Exception\ExceptionInterface;
 use Cel\Parser\Parser;
 use Cel\Runtime\Configuration;
+use Cel\Syntax\Expression;
 use Cel\Syntax\Literal\LiteralExpression;
+use Cel\Syntax\Member\CallExpression;
 use Cel\Syntax\Member\IdentifierExpression;
 use Cel\Syntax\Member\IndexExpression;
 use Cel\Syntax\Member\MemberAccessExpression;
 use Cel\Syntax\Node;
+use Cel\Syntax\ParenthesizedExpression;
 use InvalidArgumentException;
 use Throwable;
 
 use function Cel\evaluate;
 
+use function array_filter;
 use function array_key_exists;
 use function array_keys;
 use function array_map;
-use function array_unshift;
+use function array_reverse;
+use function array_slice;
 use function array_values;
+use function count;
 use function explode;
 use function implode;
-use function is_int;
 use function is_array;
 use function is_bool;
+use function is_int;
 use function is_scalar;
 use function is_string;
+use function krsort;
 use function preg_match;
 use function preg_match_all;
 use function preg_quote;
 use function preg_replace;
+use function preg_split;
+use function serialize;
 use function str_contains;
+use function str_ends_with;
 use function str_replace;
 use function strlen;
 use function substr;
 use function trim;
+
+use const PREG_OFFSET_CAPTURE;
+use const PREG_SET_ORDER;
+use const PREG_SPLIT_DELIM_CAPTURE;
+use const PREG_UNMATCHED_AS_NULL;
 
 /**
  * Expressions written inside ordinary text: `Hello {{ customer.firstName }}`.
@@ -53,6 +69,26 @@ use function trim;
  */
 final readonly class Template
 {
+    /**
+     * The macros that bind variables, by name and argument count, with the role of
+     * each variable they bind: `item` is one element of the target, `key` is an
+     * index or map key, and `value` is what an optional holds.
+     *
+     * @var array<string, array<int, list<'item'|'key'|'value'>>>
+     */
+    private const array COMPREHENSIONS = [
+        'map' => [2 => ['item'], 3 => ['item']],
+        'filter' => [2 => ['item']],
+        'all' => [2 => ['item'], 3 => ['key', 'item']],
+        'exists' => [2 => ['item'], 3 => ['key', 'item']],
+        'exists_one' => [2 => ['item']],
+        'existsOne' => [3 => ['key', 'item']],
+        'transformList' => [3 => ['key', 'item'], 4 => ['key', 'item']],
+        'transformMap' => [3 => ['key', 'item'], 4 => ['key', 'item']],
+        'optMap' => [2 => ['value']],
+        'optFlatMap' => [2 => ['value']],
+    ];
+
     /**
      * @param Configuration $configuration The runtime expressions evaluate against.
      * @param bool $enableChains Whether `@root.field` also opens an expression. Off by default:
@@ -106,45 +142,195 @@ final readonly class Template
     }
 
     /**
+     * The text and the expressions a template is written as, in order.
+     *
+     * Text comes back as it renders: `\{{` is a literal `{{`, and a `@` chain is
+     * text, because the chain opener is a host's to turn on. Each `{{ }}` and
+     * `{{{ }}}` comes back as its code and whether its author marked it raw.
+     * Adjacent text is one part, and no part is empty.
+     *
+     * @return list<string|array{code: string, raw: bool}>
+     */
+    public static function parts(string $template): array
+    {
+        $matches = [];
+        preg_match_all(
+            Grammar::SPANS,
+            $template,
+            $matches,
+            PREG_SET_ORDER | PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL,
+        );
+        // @mago-expect analysis:docblock-type-mismatch - the offset-capture shape of the matches is not modelled.
+        /** @var list<array{0: array{0: string, 1: int}, 1: array{0: null|string, 1: int}, 2: array{0: null|string, 1: int}}> $matches */
+
+        $parts = [];
+        $text = '';
+        $offset = 0;
+
+        foreach ($matches as $match) {
+            $start = $match[0][1];
+            $text .= substr($template, $offset, $start - $offset);
+            $offset = $start + strlen($match[0][0]);
+
+            $code = $match[1][0] ?? $match[2][0];
+            if (null === $code) {
+                $text .= $match[0][0] === Grammar::ESCAPED_OPEN ? '{{' : $match[0][0];
+
+                continue;
+            }
+
+            if ('' !== $text) {
+                $parts[] = $text;
+                $text = '';
+            }
+
+            $parts[] = ['code' => $code, 'raw' => null !== $match[1][0]];
+        }
+
+        $text .= substr($template, $offset);
+        if ('' !== $text) {
+            $parts[] = $text;
+        }
+
+        return $parts;
+    }
+
+    /**
+     * Writes parts back as a template, the inverse of {@see parts()}.
+     *
+     * Text has every `{{` escaped, so it renders as the text it was. Code holding
+     * `}}` is refused, as {@see expression()} refuses it, and so is text ending in
+     * a backslash before an expression, which would escape that expression.
+     *
+     * @param list<string|array{code: string, raw: bool}> $parts
+     *
+     * @throws InvalidArgumentException When a part cannot be written back as itself.
+     */
+    public static function compose(array $parts): string
+    {
+        $template = '';
+
+        foreach ($parts as $part) {
+            if (is_string($part)) {
+                $template .= self::escape($part);
+
+                continue;
+            }
+
+            if (str_ends_with($template, '\\')) {
+                throw new InvalidArgumentException(
+                    'Text ending in `\\` would escape the expression after it: ' . $part['code'],
+                );
+            }
+
+            $expression = self::expression($part['code']);
+            $template .= $part['raw'] ? '{' . $expression . '}' : $expression;
+        }
+
+        return $template;
+    }
+
+    /**
+     * Every path a piece of code reads, as `[root, ...segments]`, in the order
+     * the code reads them and each once.
+     *
+     * A field is a segment and a literal index is a segment of its own. A segment
+     * that cannot be named is `null`, meaning every item: a computed index, and
+     * the element a comprehension walks. `offers.map(o, o.price)` reads
+     * `[offers]` and `[offers, null, price]`, and `items[i].price` reads
+     * `[items, null, price]` and `[i]`. A comprehension's variables are never
+     * roots: an element reads through its collection, and an index or key reads
+     * no path. A function name and a string's contents are never paths.
+     *
+     * @return list<non-empty-list<string|int|null>>
+     *
+     * @throws ExceptionInterface When the code does not parse.
+     */
+    public static function references(string $code): array
+    {
+        $reads = [];
+        self::walk(Parser::default()->parseString($code), [], $reads);
+
+        $references = [];
+        foreach ($reads as $read) {
+            if (null === $read['path']) {
+                continue;
+            }
+
+            $references[serialize($read['path'])] = $read['path'];
+        }
+
+        return array_values($references);
+    }
+
+    /**
+     * Rewrites every read of the dotted path `$from` in the code to `$to`.
+     *
+     * A longer path that starts with it is rewritten too, keeping the rest:
+     * renaming `fields.email` turns `fields.email.domain` into
+     * `fields.contact.domain`. A comprehension variable that shadows the root is
+     * left alone, and code that does not parse comes back as it was.
+     */
+    public static function rename(string $code, string $from, string $to): string
+    {
+        try {
+            $root = Parser::default()->parseString($code);
+        } catch (ExceptionInterface) {
+            return $code;
+        }
+
+        $reads = [];
+        self::walk($root, [], $reads);
+
+        $path = explode('.', $from);
+        $depth = count($path) - 1;
+        $spans = [];
+
+        foreach ($reads as $read) {
+            $node = $read['nodes'][$depth] ?? null;
+            if (!$read['free'] || null === $node) {
+                continue;
+            }
+
+            foreach ($path as $position => $segment) {
+                if (
+                    ($read['nodes'][$position] ?? null) instanceof IndexExpression
+                    || ($read['written'][$position] ?? null) !== $segment
+                ) {
+                    continue 2;
+                }
+            }
+
+            $span = $node->getSpan();
+            $spans[$span->start] = $span;
+        }
+
+        krsort($spans);
+        foreach ($spans as $span) {
+            $code = substr($code, 0, $span->start) . $to . substr($code, $span->start + $span->length());
+        }
+
+        return $code;
+    }
+
+    /**
      * The variable names the expressions in a value read — `order` for
      * `{{ order.total }}`, `cart` for `{{ money(cart.total) }}`. Arrays are
      * walked, so a whole document can be handed in.
      *
      * A caller needs these to know which variables a document reaches, so it
-     * can supply exactly those and no more. The names come from each expression's
-     * parse tree: an identifier used as a value is a variable, while a field
-     * name and a function name are not identifier expressions at all and never
-     * appear. An expression that does not parse contributes nothing, because an
-     * expression that cannot run reads no variable.
-     *
-     * A comprehension's loop variable is a name like any other here. It resolves
-     * to nothing when supplied, so naming it costs nothing, where missing a real
-     * variable would blank the expression.
+     * can supply exactly those and no more. They are the roots of
+     * {@see references()}, so a comprehension's variable is never one. An
+     * expression that does not parse contributes nothing, because an expression
+     * that cannot run reads no variable.
      *
      * @return list<string>
      */
     public function roots(mixed $value): array
     {
-        if (is_array($value)) {
-            $roots = [];
-            foreach ($value as $item) {
-                foreach ($this->roots($item) as $root) {
-                    $roots[$root] = true;
-                }
-            }
-
-            return array_keys($roots);
-        }
-
-        if (!is_string($value)) {
-            return [];
-        }
-
         $roots = [];
-        foreach ($this->expressions($value) as $expression) {
-            foreach (self::identifiers($expression) as $identifier) {
-                $roots[$identifier] = true;
-            }
+        foreach ($this->referencesIn($value) as $reference) {
+            $roots[(string) $reference[0]] = true;
         }
 
         return array_keys($roots);
@@ -159,211 +345,213 @@ final readonly class Template
      * fields a document names instead of whole objects. A root read bare
      * (`{{ order }}`) contributes the empty chain, which means the whole value.
      *
-     * A literal index is a segment of its own, so `offers[1].price` names one
-     * item. Anything else — a computed index, a map key held in a variable —
-     * cannot be named, so the chain stops at the collection and the caller reads
-     * across it. A method call is not a field: `links.map(l, l.title)` yields
-     * `links`, and the lambda body's `l` is a root like any other, resolving to
-     * nothing when it is supplied.
+     * A chain is a path from {@see references()} cut where it meets a segment
+     * that cannot be named, so it stops at the collection and the caller reads
+     * across it: `links.map(l, l.title)` and `links[i].title` both yield `links`.
      *
      * @return array<string, list<list<string|int>>>
      */
     public function paths(mixed $value): array
     {
+        $paths = [];
+        foreach ($this->referencesIn($value) as $reference) {
+            $chain = [];
+            foreach (array_slice($reference, 1) as $segment) {
+                if (null === $segment) {
+                    break;
+                }
+
+                $chain[] = $segment;
+            }
+
+            $paths[(string) $reference[0]][serialize($chain)] = $chain;
+        }
+
+        $grouped = [];
+        foreach ($paths as $root => $chains) {
+            $grouped[$root] = array_values($chains);
+        }
+
+        return $grouped;
+    }
+
+    /**
+     * Every path every expression in a value reads. An expression that does not
+     * parse reads nothing.
+     *
+     * @return list<non-empty-list<string|int|null>>
+     */
+    private function referencesIn(mixed $value): array
+    {
         if (is_array($value)) {
-            $paths = [];
+            $references = [];
             foreach ($value as $item) {
-                foreach ($this->paths($item) as $root => $chains) {
-                    foreach ($chains as $chain) {
-                        $paths[$root][] = $chain;
-                    }
+                foreach ($this->referencesIn($item) as $reference) {
+                    $references[serialize($reference)] = $reference;
                 }
             }
 
-            return array_map(self::unique(...), $paths);
+            return array_values($references);
         }
 
         if (!is_string($value)) {
             return [];
         }
 
-        $paths = [];
-        foreach ($this->expressions($value) as $expression) {
-            foreach (self::chains($expression) as [$root, $chain]) {
-                $paths[$root][] = $chain;
-            }
-        }
-
-        return array_map(self::unique(...), $paths);
-    }
-
-    /**
-     * @param list<list<string|int>> $chains
-     *
-     * @return list<list<string|int>>
-     */
-    private static function unique(array $chains): array
-    {
-        $seen = [];
-        foreach ($chains as $chain) {
-            $seen[implode("\0", array_map(strval(...), $chain))] = $chain;
-        }
-
-        return array_values($seen);
-    }
-
-    /**
-     * Every rooted chain in an expression, as `[root, segments]` pairs.
-     *
-     * @return list<array{0: string, 1: list<string|int>}>
-     */
-    private static function chains(string $expression): array
-    {
-        if ('' === $expression) {
-            return [];
-        }
-
-        try {
-            $node = Parser::default()->parseString($expression);
-        } catch (Throwable) {
-            return [];
-        }
-
-        $chains = [];
-        self::collect($node, $chains);
-
-        return $chains;
-    }
-
-    /**
-     * @param list<array{0: string, 1: list<string|int>}> $chains
-     */
-    private static function collect(Node $node, array &$chains): void
-    {
-        if ($node instanceof MemberAccessExpression || $node instanceof IndexExpression) {
-            $segments = [];
-            $current = $node;
-
-            while (true) {
-                if ($current instanceof MemberAccessExpression) {
-                    array_unshift($segments, $current->field->name);
-                    $current = $current->operand;
-
-                    continue;
-                }
-
-                if ($current instanceof IndexExpression) {
-                    // The index is an expression of its own and may read
-                    // variables: `items[position.current]` reads `position` too.
-                    self::collect($current->index, $chains);
-
-                    $literal = $current->index instanceof LiteralExpression
-                        ? $current->index->getValue()
-                        : null;
-
-                    if (is_int($literal) || is_string($literal)) {
-                        array_unshift($segments, $literal);
-                    } else {
-                        // Nothing past an unnameable index belongs to a path: the
-                        // chain is the collection, and every item is read.
-                        $segments = [];
-                    }
-
-                    $current = $current->operand;
-
-                    continue;
-                }
-
-                break;
-            }
-
-            if ($current instanceof IdentifierExpression) {
-                $chains[] = [$current->identifier->name, $segments];
-
-                return;
-            }
-
-            // The chain bottoms out on something that is not a variable — a call
-            // or a literal — so it names no path, but its own tree may.
-            self::collect($current, $chains);
-
-            return;
-        }
-
-        if ($node instanceof IdentifierExpression) {
-            $chains[] = [$node->identifier->name, []];
-
-            return;
-        }
-
-        foreach ($node->getChildren() as $child) {
-            self::collect($child, $chains);
-        }
-    }
-
-    /**
-     * Every expression written in the value, taken from the braces around
-     * them. A chain contributes its own text, which is an expression already.
-     *
-     * @return list<string>
-     */
-    private function expressions(string $value): array
-    {
-        $unescaped = str_replace(Grammar::ESCAPED_OPEN, '', $value);
-
         $expressions = [];
-
-        preg_match_all(Grammar::EXPRESSIONS, $unescaped, $matches, PREG_SET_ORDER);
-        foreach ($matches as $match) {
-            $expressions[] = trim('' !== $match[1] ? $match[1] : ($match[2] ?? ''));
-        }
-
-        if ($this->enableChains) {
-            preg_match_all('/' . Grammar::AT_CHAIN . '/', $unescaped, $chains);
-            foreach ($chains[1] ?? [] as $chain) {
-                $expressions[] = $chain;
+        foreach (self::parts($value) as $part) {
+            if (is_array($part)) {
+                $expressions[] = $part['code'];
+            } elseif ($this->enableChains) {
+                $chains = [];
+                preg_match_all('/' . Grammar::AT_CHAIN . '/', $part, $chains);
+                foreach ($chains[1] ?? [] as $chain) {
+                    $expressions[] = $chain;
+                }
             }
         }
 
-        return $expressions;
+        $references = [];
+        foreach ($expressions as $expression) {
+            try {
+                $read = self::references($expression);
+            } catch (ExceptionInterface) {
+                continue;
+            }
+
+            foreach ($read as $reference) {
+                $references[serialize($reference)] = $reference;
+            }
+        }
+
+        return array_values($references);
     }
 
     /**
-     * The identifiers an expression reads, from its parse tree.
+     * Collects every chain the tree reads: the path it resolves to (null when it
+     * reads no path), whether its root is a free variable, the segments as
+     * written, and the node that ends each written segment.
      *
-     * @return list<string>
+     * @param array<string, null|non-empty-list<string|int|null>> $scope What each bound variable resolves to.
+     * @param list<array{path: null|non-empty-list<string|int|null>, free: bool, written: non-empty-list<string|int|null>, nodes: non-empty-list<Expression>}> $reads
      */
-    private static function identifiers(string $expression): array
+    private static function walk(Node $node, array $scope, array &$reads): void
     {
-        if ('' === $expression) {
-            return [];
+        if (
+            $node instanceof IdentifierExpression
+            || $node instanceof MemberAccessExpression
+            || $node instanceof IndexExpression
+        ) {
+            self::walkChain($node, $scope, $reads);
+
+            return;
         }
 
-        try {
-            $node = Parser::default()->parseString($expression);
-        } catch (Throwable) {
-            return [];
-        }
+        $target = $node instanceof CallExpression ? $node->target : null;
+        $arguments = $node instanceof CallExpression ? $node->arguments->elements : [];
+        $roles = $node instanceof CallExpression && null !== $target
+            ? self::COMPREHENSIONS[$node->function->name][count($arguments)] ?? []
+            : [];
+        $variables = array_slice($arguments, 0, count($roles));
 
-        $identifiers = [];
-        self::visit($node, static function(Node $node) use (&$identifiers): void {
-            if ($node instanceof IdentifierExpression) {
-                $identifiers[] = $node->identifier->name;
+        if (
+            null === $target
+            || [] === $roles
+            || [] !== array_filter(
+                $variables,
+                static fn(Expression $variable): bool => !$variable instanceof IdentifierExpression,
+            )
+        ) {
+            foreach ($node->getChildren() as $child) {
+                self::walk($child, $scope, $reads);
             }
-        });
 
-        return $identifiers;
+            return;
+        }
+
+        $collection = self::walkChain($target, $scope, $reads);
+
+        foreach ($variables as $position => $variable) {
+            if (!$variable instanceof IdentifierExpression) {
+                continue;
+            }
+
+            $scope[$variable->identifier->name] = match ($roles[$position] ?? 'key') {
+                'item' => null === $collection ? null : [...$collection, null],
+                'key' => null,
+                'value' => $collection,
+            };
+        }
+
+        foreach (array_slice($arguments, count($roles)) as $argument) {
+            self::walk($argument, $scope, $reads);
+        }
     }
 
     /**
-     * @param callable(Node): void $visitor
+     * Walks one chain and answers the path it resolves to, or null when it reads
+     * no path.
+     *
+     * @param array<string, null|non-empty-list<string|int|null>> $scope
+     * @param list<array{path: null|non-empty-list<string|int|null>, free: bool, written: non-empty-list<string|int|null>, nodes: non-empty-list<Expression>}> $reads
+     *
+     * @return null|non-empty-list<string|int|null>
      */
-    private static function visit(Node $node, callable $visitor): void
+    private static function walkChain(Expression $node, array $scope, array &$reads): null|array
     {
-        $visitor($node);
-        foreach ($node->getChildren() as $child) {
-            self::visit($child, $visitor);
+        /** @var list<string|int|null> $segments */
+        $segments = [];
+        /** @var list<Expression> $nodes */
+        $nodes = [];
+        /** @var list<Expression> $indexes */
+        $indexes = [];
+        $current = $node;
+
+        while (
+            $current instanceof MemberAccessExpression
+            || $current instanceof IndexExpression
+            || $current instanceof ParenthesizedExpression
+        ) {
+            if ($current instanceof ParenthesizedExpression) {
+                $current = $current->expression;
+
+                continue;
+            }
+
+            if ($current instanceof MemberAccessExpression) {
+                $segments = [$current->field->name, ...$segments];
+            } else {
+                $literal = $current->index instanceof LiteralExpression ? $current->index->getValue() : null;
+                $segments = [is_int($literal) || is_string($literal) ? $literal : null, ...$segments];
+                $indexes[] = $current->index;
+            }
+
+            $nodes = [$current, ...$nodes];
+            $current = $current->operand;
         }
+
+        $path = null;
+        if ($current instanceof IdentifierExpression) {
+            $name = $current->identifier->name;
+            $free = !array_key_exists($name, $scope);
+            $prefix = $free ? [$name] : $scope[$name] ?? null;
+            $path = null === $prefix ? null : [...$prefix, ...$segments];
+
+            $reads[] = [
+                'path' => $path,
+                'free' => $free,
+                'written' => [$name, ...$segments],
+                'nodes' => [$current, ...$nodes],
+            ];
+        } else {
+            self::walk($current, $scope, $reads);
+        }
+
+        foreach (array_reverse($indexes) as $index) {
+            self::walk($index, $scope, $reads);
+        }
+
+        return $path;
     }
 
     /**
@@ -440,11 +628,11 @@ final readonly class Template
     }
 
     /** Whether every expression in the value parses. */
-    public function isValid(mixed $value): bool
+    public static function isValid(mixed $value): bool
     {
         if (is_array($value)) {
             foreach ($value as $child) {
-                if (!$this->isValid($child)) {
+                if (!self::isValid($child)) {
                     return false;
                 }
             }
@@ -519,16 +707,16 @@ final readonly class Template
             return null === $fragment ? $value : $fragment($value, null);
         }
 
-        if (preg_match(Grammar::WHOLE_EXECUTABLE, $value, $match) === 1) {
-            $result = $this->evaluateExpression($match[1], $values);
+        $parts = self::parts($value);
+        $expressions = array_values(array_filter($parts, is_array(...)));
+        $whole = 1 === count($expressions) && '' === trim(implode('', array_filter($parts, is_string(...))))
+            ? $expressions[0]
+            : null;
 
-            return null === $fragment ? $result : $fragment($result, true);
-        }
+        if (null !== $whole) {
+            $result = $this->evaluateExpression($whole['code'], $values);
 
-        if (preg_match(Grammar::WHOLE_INERT, $value, $match) === 1) {
-            $result = $this->evaluateExpression($match[1], $values);
-
-            return null === $fragment ? $result : $fragment($result, false);
+            return null === $fragment ? $result : $fragment($result, $whole['raw']);
         }
 
         if ($this->isWholeChain($value, $values)) {
@@ -538,57 +726,61 @@ final readonly class Template
             return null === $fragment ? $result : $fragment($result, false);
         }
 
-        return $this->renderText($value, $values, $fragment);
+        $rendered = '';
+        $text = '';
+
+        foreach ($parts as $part) {
+            if (is_string($part)) {
+                $text = $part;
+
+                continue;
+            }
+
+            $rendered .= $this->renderText($text, $values, $fragment);
+            $text = '';
+
+            $result = $this->evaluateExpression($part['code'], $values);
+            $rendered .= (string) (null === $fragment ? self::text($result) : $fragment($result, $part['raw']));
+        }
+
+        return $rendered . $this->renderText($text, $values, $fragment);
     }
 
     /**
+     * Renders text, resolving each chain a variable can resolve when the host
+     * turned chains on. Any other chain stays the text the author wrote.
+     *
      * @param array<string, mixed> $values
      * @param null|(callable(mixed, null|bool): mixed) $fragment
      */
-    private function renderText(string $value, array $values, null|callable $fragment): string
+    private function renderText(string $text, array $values, null|callable $fragment): string
     {
-        preg_match_all(
-            Grammar::SPANS,
-            $value,
-            $matches,
-            PREG_SET_ORDER | PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL,
-        );
+        $pieces = $this->enableChains
+            ? preg_split('/' . Grammar::AT_CHAIN . '/', $text, -1, PREG_SPLIT_DELIM_CAPTURE)
+            : false;
 
         $rendered = '';
-        $offset = 0;
+        $literal = '';
 
-        foreach ($matches as $match) {
-            $start = $match[0][1];
-            $literal = substr($value, $offset, $start - $offset);
-            $rendered .= (string) (null === $fragment ? $literal : $fragment($literal, null));
+        foreach (false === $pieces ? [$text] : $pieces as $position => $piece) {
+            if (0 === $position % 2) {
+                $literal .= $piece;
 
-            if ($match[0][0][0] === '\\') {
-                $rendered .= (string) (null === $fragment ? '{{' : $fragment('{{', null));
-            } elseif ($match[1][1] !== -1) {
-                $result = $this->evaluateExpression($match[1][0], $values);
-                $rendered .= (string) (
-                    null === $fragment ? self::text($result) : $fragment($result, true)
-                );
-            } elseif ($match[2][1] !== -1) {
-                $result = $this->evaluateExpression($match[2][0], $values);
-                $rendered .= (string) (
-                    null === $fragment ? self::text($result) : $fragment($result, false)
-                );
-            } elseif (!$this->enableChains || !self::isBoundRoot($match[3][0], $values)) {
-                // A chain the host did not turn on, or one no variable can
-                // resolve, stays the text the author wrote.
-                $rendered .= (string) (null === $fragment ? $match[0][0] : $fragment($match[0][0], null));
-            } else {
-                $result = $this->evaluateExpression($match[3][0], $values);
-                $rendered .= (string) (
-                    null === $fragment ? self::text($result) : $fragment($result, false)
-                );
+                continue;
             }
 
-            $offset = $start + strlen($match[0][0]);
-        }
+            if (!self::isBoundRoot($piece, $values)) {
+                $literal .= '@' . $piece;
 
-        $literal = substr($value, $offset);
+                continue;
+            }
+
+            $rendered .= (string) (null === $fragment ? $literal : $fragment($literal, null));
+            $literal = '';
+
+            $result = $this->evaluateExpression($piece, $values);
+            $rendered .= (string) (null === $fragment ? self::text($result) : $fragment($result, false));
+        }
 
         return $rendered . (string) (null === $fragment ? $literal : $fragment($literal, null));
     }
