@@ -12,11 +12,13 @@ use Cel\Value\FloatValue;
 use Cel\Value\IntegerValue;
 use Cel\Value\StringValue;
 use Cel\Value\Value;
+use DateTimeImmutable;
 use Override;
 
 use function count;
 use function implode;
 use function is_array;
+use function is_string;
 
 final class CallableExtensionTest extends RuntimeTestCase
 {
@@ -95,6 +97,48 @@ final class CallableExtensionTest extends RuntimeTestCase
             new StringValue('unsized'),
             self::configuration(),
         ];
+
+        yield 'a timestamp reaches a callable as a date in UTC' => [
+            'instant(timestamp("2026-09-30T03:30:00Z"))',
+            [],
+            new StringValue('2026-09-30T03:30:00.000000+00:00'),
+            self::configuration(),
+        ];
+
+        yield 'a timestamp keeps its fraction of a second' => [
+            'instant(timestamp("2026-09-30T03:30:00.25Z"))',
+            [],
+            new StringValue('2026-09-30T03:30:00.250000+00:00'),
+            self::configuration(),
+        ];
+
+        yield 'a timestamp before 1970 keeps its fraction of a second' => [
+            'instant(timestamp("1969-12-31T23:59:58.5Z"))',
+            [],
+            new StringValue('1969-12-31T23:59:58.500000+00:00'),
+            self::configuration(),
+        ];
+
+        yield 'a timestamp inside a list reaches a callable as a date' => [
+            'instants([timestamp("2026-09-30T03:30:00Z")])',
+            [],
+            new StringValue('2026-09-30T03:30:00.000000+00:00'),
+            self::configuration(),
+        ];
+
+        yield 'a timestamp inside a map reaches a callable as a date' => [
+            'instants({"paid": timestamp("2026-09-30T03:30:00Z")})',
+            [],
+            new StringValue('paid=2026-09-30T03:30:00.000000+00:00'),
+            self::configuration(),
+        ];
+
+        yield 'a timestamp inside an optional reaches a callable as a date' => [
+            'instant(optional.of(timestamp("2026-09-30T03:30:00Z")))',
+            [],
+            new StringValue('2026-09-30T03:30:00.000000+00:00'),
+            self::configuration(),
+        ];
     }
 
     private static function configuration(): Configuration
@@ -108,11 +152,31 @@ final class CallableExtensionTest extends RuntimeTestCase
                 is_array($value) => 'a list of ' . count($value),
                 default => 'something',
             },
-            'label' => static fn(mixed ...$parts): string => implode('|', $parts),
-            'half' => static fn(mixed $value): float => ((float) $value) / 2,
-            'size' => static fn(mixed $value): string => 'unsized',
+            'label' => static fn(string|int|float ...$parts): string => implode('|', $parts),
+            'half' => static fn(int $value): float => $value / 2,
+            'size' => static fn(): string => 'unsized',
+            'instant' => self::instant(...),
+            'instants' => self::instants(...),
         ]));
 
         return $configuration;
+    }
+
+    /**
+     * @param array<array-key, DateTimeImmutable> $values
+     */
+    private static function instants(array $values): string
+    {
+        $instants = [];
+        foreach ($values as $key => $value) {
+            $instants[] = (is_string($key) ? $key . '=' : '') . self::instant($value);
+        }
+
+        return implode(',', $instants);
+    }
+
+    private static function instant(mixed $value): string
+    {
+        return $value instanceof DateTimeImmutable ? $value->format('Y-m-d\TH:i:s.uP') : 'not a date';
     }
 }

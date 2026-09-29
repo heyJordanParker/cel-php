@@ -13,24 +13,12 @@ use Override;
 final readonly class DateTimeExtension implements ExtensionInterface
 {
     /**
-     * @param non-empty-string $timezone The timezone `date()` renders in. Every
-     *                                   other function here works in UTC, as it did
-     *                                   before, and is unaffected.
-     * @param non-empty-string $defaultFormat The format `date()` uses when a call gives none.
-     */
-    public function __construct(
-        private string $timezone = 'UTC',
-        private string $defaultFormat = Function\DateFunction::ISO_8601,
-    ) {}
-
-    /**
      * @inheritDoc
      */
     #[Override]
     public function getFunctions(): array
     {
         return [
-            new Function\DateFunction($this->timezone, $this->defaultFormat),
             new Function\NowFunction(),
             new Function\TimestampFunction(),
             new Function\DurationFunction(),
