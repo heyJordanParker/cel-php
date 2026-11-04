@@ -1,0 +1,59 @@
+{
+  "objects": {
+    "Order": {
+      "total": "int",
+      "customer": { "object": "Contact" },
+      "items": { "list": { "object": "Item" } },
+      "meta": { "map": "string" },
+      "note": { "union": ["string", { "object": "Contact" }] }
+    },
+    "Contact": {
+      "email": "string",
+      "orders": { "list": { "object": "Order" } }
+    },
+    "Item": {
+      "price": "int"
+    }
+  },
+  "variables": {
+    "order": { "object": "Order" },
+    "offers": { "list": { "object": "Item" } },
+    "anything": "dyn",
+    "name": "string"
+  },
+  "cases": [
+    { "expression": "order.total", "issues": [], "type": "int" },
+    { "expression": "(order).total", "issues": [], "type": "int" },
+    { "expression": "order[\"total\"]", "issues": [], "type": "int" },
+    { "expression": "order.customer.orders[0].total", "issues": [], "type": "int" },
+    { "expression": "order.items[order.total].price", "issues": [], "type": "int" },
+    { "expression": "order.meta.anything", "issues": [], "type": "string" },
+    { "expression": "order.note.email", "issues": [], "type": "string" },
+    { "expression": "anything.a.b[0]", "issues": [], "type": "dyn" },
+    { "expression": "order.total + 1", "issues": [], "type": "dyn" },
+    { "expression": "offers.map(o, o.price)", "issues": [], "type": "dyn" },
+    { "expression": "offers.filter(o, o.price > 1)", "issues": [], "type": { "list": { "object": "Item" } } },
+    { "expression": "offers.all(k, v, v.price > 0)", "issues": [], "type": "dyn" },
+    { "expression": "order.customer.map(c, 1)", "issues": [], "type": "dyn" },
+    { "expression": "order.nope", "issues": [["UndefinedField", "order", "nope"]], "type": "dyn" },
+    { "expression": "order.nope + order.nope", "issues": [["UndefinedField", "order", "nope"]], "type": "dyn" },
+    { "expression": "missing.x", "issues": [["UndeclaredReference", "missing", "missing"]], "type": "dyn" },
+    { "expression": "order.customer.orders[0].nope", "issues": [["UndefinedField", "order.customer.orders[0]", "nope"]], "type": "dyn" },
+    { "expression": "order.total[0]", "issues": [["UndefinedField", "order.total", "0"]], "type": "dyn" },
+    { "expression": "order.customer[order.total]", "issues": [["NotIndexable", "order.customer", ""]], "type": "dyn" },
+    { "expression": "order.items.price", "issues": [["UndefinedField", "order.items", "price"]], "type": "dyn" },
+    { "expression": "name.length", "issues": [["UndefinedField", "name", "length"]], "type": "dyn" },
+    { "expression": "order.note.nope", "issues": [["UndefinedField", "order.note", "nope"]], "type": "dyn" },
+    { "expression": "money(order.nope)", "issues": [["UndefinedField", "order", "nope"]], "type": "dyn" },
+    { "expression": "offers.map(o, o.nope)", "issues": [["UndefinedField", "offers", "nope"]], "type": "dyn" },
+    { "expression": "order.items.exists(i, i.nope)", "issues": [["UndefinedField", "order.items", "nope"]], "type": "dyn" },
+    { "expression": "offers.filter(o, o.price > 1)[0].nope", "issues": [["UndefinedField", "offers[0]", "nope"]], "type": "dyn" },
+    { "expression": "offers.map(o, offers.map(p, p.nope))", "issues": [["UndefinedField", "offers", "nope"]], "type": "dyn" },
+    { "expression": "order.customer.map(c, c.email)", "issues": [["NotIndexable", "order.customer", ""]], "type": "dyn" },
+    {
+      "expression": "nope.x || order.nope",
+      "issues": [["UndeclaredReference", "nope", "nope"], ["UndefinedField", "order", "nope"]],
+      "type": "dyn"
+    }
+  ]
+}

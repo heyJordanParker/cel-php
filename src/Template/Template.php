@@ -76,7 +76,7 @@ final readonly class Template
      *
      * @var array<string, array<int, list<'item'|'key'|'value'>>>
      */
-    private const array COMPREHENSIONS = [
+    public const array COMPREHENSIONS = [
         'map' => [2 => ['item'], 3 => ['item']],
         'filter' => [2 => ['item']],
         'all' => [2 => ['item'], 3 => ['key', 'item']],
