@@ -146,10 +146,11 @@ final readonly class Template
      *
      * Text comes back as it renders: `\{{` is a literal `{{`, and a `@` chain is
      * text, because the chain opener is a host's to turn on. Each `{{ }}` and
-     * `{{{ }}}` comes back as its code and whether its author marked it raw.
+     * `{{{ }}}` comes back as its code, whether its author marked it raw, and
+     * its source, the tag exactly as written.
      * Adjacent text is one part, and no part is empty.
      *
-     * @return list<string|array{code: string, raw: bool}>
+     * @return list<string|array{code: string, raw: bool, source: string}>
      */
     public static function parts(string $template): array
     {
@@ -184,7 +185,7 @@ final readonly class Template
                 $text = '';
             }
 
-            $parts[] = ['code' => $code, 'raw' => null !== $match[1][0]];
+            $parts[] = ['code' => $code, 'raw' => null !== $match[1][0], 'source' => $match[0][0]];
         }
 
         $text .= substr($template, $offset);

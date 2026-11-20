@@ -522,25 +522,31 @@ final class TemplateTest extends TestCase
     public function testPartsSplitsTextFromExpressions(): void
     {
         static::assertSame(
-            ['Hi ', ['code' => 'name', 'raw' => false], '!'],
+            ['Hi ', ['code' => 'name', 'raw' => false, 'source' => '{{ name }}'], '!'],
             Template::parts('Hi {{ name }}!'),
         );
     }
 
     public function testPartsMarksARawExpression(): void
     {
-        static::assertSame([['code' => 'html', 'raw' => true]], Template::parts('{{{ html }}}'));
+        static::assertSame(
+            [['code' => 'html', 'raw' => true, 'source' => '{{{ html }}}']],
+            Template::parts('{{{ html }}}'),
+        );
     }
 
     public function testPartsTrimsTheCode(): void
     {
-        static::assertSame([['code' => 'a', 'raw' => false]], Template::parts('{{   a   }}'));
+        static::assertSame(
+            [['code' => 'a', 'raw' => false, 'source' => '{{   a   }}']],
+            Template::parts('{{   a   }}'),
+        );
     }
 
     public function testPartsReadsAnEscapedOpenerAsText(): void
     {
         static::assertSame(
-            ['{{ literal }} ', ['code' => 'a', 'raw' => false]],
+            ['{{ literal }} ', ['code' => 'a', 'raw' => false, 'source' => '{{ a }}']],
             Template::parts('\\{{ literal }} {{ a }}'),
         );
     }
@@ -553,10 +559,26 @@ final class TemplateTest extends TestCase
     public function testPartsHasNoEmptyText(): void
     {
         static::assertSame(
-            [['code' => 'a', 'raw' => false], ['code' => 'b', 'raw' => false]],
+            [
+                ['code' => 'a', 'raw' => false, 'source' => '{{ a }}'],
+                ['code' => 'b', 'raw' => false, 'source' => '{{ b }}'],
+            ],
             Template::parts('{{ a }}{{ b }}'),
         );
         static::assertSame([], Template::parts(''));
+    }
+
+    public function testPartsGiveEachTagItsSourceAsWritten(): void
+    {
+        static::assertSame(
+            [
+                'a ',
+                ['code' => 'b', 'raw' => false, 'source' => '{{b }}'],
+                ' ',
+                ['code' => 'c', 'raw' => true, 'source' => '{{{  c}}}'],
+            ],
+            Template::parts('a {{b }} {{{  c}}}'),
+        );
     }
 
     // --- Composing parts ---
